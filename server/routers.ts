@@ -5,7 +5,13 @@ import {
   getSessionToken,
   SESSION_COOKIE,
 } from "./_core/context";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import {
+  passwordChangeProcedure,
+  publicProcedure,
+  protectedProcedure,
+  router,
+} from "./_core/trpc";
+import { makeRequest, type DirectionsResult } from "./_core/map";
 import {
   addAudit,
   canCreateDelivery,
@@ -16,11 +22,13 @@ import {
   createUser,
   findDelivery,
   findUserByEmail,
+  findUserByIdentifier,
   findUserById,
   hashPassword,
   nextDeliveryId,
   publicUser,
   readStore,
+  revokeOtherSessions,
   verifyPassword,
   withStore,
   type DeliveryStatus,
@@ -91,48 +99,15 @@ export const appRouter = router({
       };
     }),
     me: publicProcedure.query(({ ctx }) => ctx.user),
-    setup: publicProcedure
-      .input(
-        z.object({
-          name: z.string().min(2).max(100),
-          email: z.string().email(),
-          password: passwordSchema,
-          phone: z.string().max(40).optional(),
-        })
-      )
-      .mutation(({ input, ctx }) => {
-        const store = readStore();
-        if (store.users.length > 0)
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Owner setup is already complete. Please sign in.",
-          });
-        const user = createUser({ ...input, role: "Owner" });
-        const token = createSession(user.id);
-        withStore(next =>
-          addAudit(next, {
-            action: "owner_setup",
-            actorId: user.id,
-            actorName: user.name,
-            targetId: user.id,
-            details: "Owner account created",
-          })
-        );
-        ctx.res.cookie(SESSION_COOKIE, token, {
-          ...getPasswordSessionCookieOptions(ctx.req),
-          maxAge: 1000 * 60 * 60 * 24 * 30,
-        });
-        return publicUser(user);
-      }),
     login: publicProcedure
       .input(
         z.object({
-          email: z.string().email(),
+          identifier: z.string().min(1).max(320),
           password: z.string().min(1).max(128),
         })
       )
       .mutation(({ input, ctx }) => {
-        const user = findUserByEmail(input.email);
+        const user = findUserByIdentifier(input.identifier);
         if (
           !user ||
           !user.active ||
@@ -140,7 +115,7 @@ export const appRouter = router({
         ) {
           throw new TRPCError({
             code: "UNAUTHORIZED",
-            message: "Email or password is incorrect.",
+            message: "Username/email or password is incorrect.",
           });
         }
         const token = createSession(user.id);
@@ -160,6 +135,35 @@ export const appRouter = router({
           maxAge: 1000 * 60 * 60 * 24 * 30,
         });
         return publicUser(user);
+      }),
+    changePassword: passwordChangeProcedure
+      .input(z.object({ newPassword: z.string().min(12).max(128) }))
+      .mutation(({ input, ctx }) => {
+        const token = getSessionToken(ctx.req);
+        if (!token)
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Sign in required.",
+          });
+        withStore(store => {
+          const user = store.users.find(item => item.id === ctx.user.id);
+          if (!user)
+            throw new TRPCError({
+              code: "UNAUTHORIZED",
+              message: "Sign in required.",
+            });
+          user.passwordHash = hashPassword(input.newPassword);
+          user.mustChangePassword = false;
+          addAudit(store, {
+            action: "password_changed",
+            actorId: user.id,
+            actorName: user.name,
+            targetId: user.id,
+            details: "Account password changed",
+          });
+        });
+        revokeOtherSessions(ctx.user.id, token);
+        return { success: true } as const;
       }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const token = getSessionToken(ctx.req);
@@ -230,7 +234,8 @@ export const appRouter = router({
       .input(
         z.object({
           name: z.string().min(2).max(100),
-          email: z.string().email(),
+          username: z.string().trim().min(1).max(80),
+          email: z.string().email().optional(),
           phone: z.string().max(40).optional(),
           role: roleSchema,
           password: passwordSchema,
@@ -243,7 +248,7 @@ export const appRouter = router({
             code: "FORBIDDEN",
             message: "Only the Owner can create another Owner account.",
           });
-        const user = createUser(input);
+        const user = createUser({ ...input, email: input.email ?? "" });
         withStore(store =>
           addAudit(store, {
             action: "staff_created",
@@ -307,6 +312,155 @@ export const appRouter = router({
   }),
 
   deliveries: router({
+    optimizeAndAssign: protectedProcedure
+      .input(
+        z.object({
+          origin: z.string().trim().min(1).max(500),
+          deliveryIds: z.array(z.string().min(1)).min(1).max(23),
+          driverId: z.string().uuid(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        requireRole(ctx.user, [
+          "Owner",
+          "Director",
+          "Dispatch Manager",
+          "Dispatch Staff",
+        ]);
+        if (new Set(input.deliveryIds).size !== input.deliveryIds.length)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Choose each delivery only once.",
+          });
+        const initialStore = readStore();
+        const driver = findUserById(input.driverId, initialStore);
+        if (!driver || driver.role !== "Driver" || !driver.active)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Choose an active Driver account.",
+          });
+        const deliveries = input.deliveryIds.map(id =>
+          findDelivery(id, initialStore)
+        );
+        if (deliveries.some(item => !item))
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "One or more deliveries were not found.",
+          });
+        if (
+          deliveries.some(
+            item => item!.status === "Delivered" || item!.status === "Cancelled"
+          )
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Delivered or cancelled deliveries cannot be routed.",
+          });
+        const karachi = /\b(karachi|pakistan)\b/i;
+        const qualify = (value: string) =>
+          karachi.test(value) ? value : `${value}, Karachi, Pakistan`;
+        const origin = qualify(input.origin.trim());
+        let directions: DirectionsResult;
+        try {
+          directions = await makeRequest<DirectionsResult>(
+            "/maps/api/directions/json",
+            {
+              origin,
+              destination: origin,
+              mode: "driving",
+              optimize: true,
+              waypoints: `optimize:true|${deliveries.map(item => qualify(item!.address)).join("|")}`,
+            }
+          );
+        } catch {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message:
+              "Route optimization is unavailable. Check Maps service configuration and try again.",
+          });
+        }
+        const route = directions.routes?.[0];
+        if (
+          directions.status !== "OK" ||
+          !route ||
+          route.waypoint_order?.length !== deliveries.length
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Maps could not calculate this route. Check the origin and delivery addresses, then try again.",
+          });
+        const ordered = route.waypoint_order.map(index => deliveries[index]!);
+        const distance = route.legs.reduce(
+          (sum, leg) => sum + leg.distance.value,
+          0
+        );
+        const duration = route.legs.reduce(
+          (sum, leg) => sum + leg.duration.value,
+          0
+        );
+        const formatDistance = (meters: number) =>
+          meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters} m`;
+        const formatDuration = (seconds: number) => {
+          const minutes = Math.round(seconds / 60);
+          return minutes >= 60
+            ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min`
+            : `${minutes} min`;
+        };
+        withStore(store => {
+          const currentDriver = findUserById(input.driverId, store);
+          if (
+            !currentDriver ||
+            currentDriver.role !== "Driver" ||
+            !currentDriver.active
+          )
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Choose an active Driver account.",
+            });
+          ordered.forEach((routed, index) => {
+            const delivery = findDelivery(routed.id, store);
+            if (
+              !delivery ||
+              delivery.status === "Delivered" ||
+              delivery.status === "Cancelled"
+            )
+              throw new TRPCError({
+                code: "CONFLICT",
+                message:
+                  "A delivery changed while the route was being calculated. Refresh and try again.",
+              });
+            delivery.assignedDriverId = currentDriver.id;
+            if (
+              ["Scheduled", "Ready for Dispatch", "Assigned"].includes(
+                delivery.status
+              )
+            )
+              delivery.status = "Assigned";
+            delivery.route = `Optimized loop from ${origin} — stop ${index + 1} of ${ordered.length}`;
+            delivery.updatedAt = new Date().toISOString();
+            addAudit(store, {
+              action: "route_assigned",
+              actorId: ctx.user.id,
+              actorName: ctx.user.name,
+              targetId: delivery.id,
+              details: `Assigned to ${currentDriver.name}; optimized route stop ${index + 1} of ${ordered.length}`,
+            });
+          });
+        });
+        return {
+          driverName: driver.name,
+          routeSummary: route.summary,
+          distanceText: formatDistance(distance),
+          durationText: formatDuration(duration),
+          orderedStops: ordered.map(item => ({
+            deliveryId: item.id,
+            customer: item.customer,
+            address: item.address,
+          })),
+          encodedPolyline: route.overview_polyline.points,
+        };
+      }),
     list: protectedProcedure
       .input(
         z
@@ -542,7 +696,15 @@ export const appRouter = router({
           deliveredCartons: z.number().int().nonnegative(),
           rejectedCartons: z.number().int().nonnegative().optional(),
           notes: z.string().max(1000).optional(),
-          photos: z.array(z.string().max(180)).max(8).optional(),
+          photos: z
+            .array(
+              z
+                .string()
+                .max(1_340_000)
+                .regex(/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/i)
+            )
+            .max(3)
+            .optional(),
         })
       )
       .mutation(({ input, ctx }) =>

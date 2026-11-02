@@ -6,10 +6,12 @@ import { getUserBySessionToken, publicUser, type Role } from "../store";
 export type AuthUser = {
   id: string;
   name: string;
+  username: string;
   email: string;
   phone: string;
   role: Role;
   active: boolean;
+  mustChangePassword: boolean;
   createdAt: string;
   lastSignedIn: string | null;
 };

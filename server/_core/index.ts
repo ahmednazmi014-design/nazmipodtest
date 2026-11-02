@@ -7,12 +7,22 @@ import { publicPlatformScript } from "./publicConfig";
 import { appRouter } from "../routers";
 import { createContext, getRequestUser } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { findDelivery, findUserById, readStore } from "../store";
+import {
+  bootstrapOwnerFromEnvironment,
+  findDelivery,
+  findUserById,
+  readStore,
+} from "../store";
 import { createPodPdf } from "../pdf";
 
 async function startServer() {
+  bootstrapOwnerFromEnvironment();
   const app = express();
   const server = createServer(app);
+  app.use((_req, res, next) => {
+    res.setHeader("Permissions-Policy", "geolocation=(self)");
+    next();
+  });
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.get("/api/health", (_req, res) =>
@@ -66,7 +76,17 @@ async function startServer() {
   registerOAuthRoutes(app);
   app.use(
     "/api/trpc",
-    createExpressMiddleware({ router: appRouter, createContext })
+    createExpressMiddleware({
+      router: appRouter,
+      createContext,
+      onError({ error, path, type }) {
+        if (error.code === "INTERNAL_SERVER_ERROR") {
+          console.error(
+            `[tRPC Internal Server Error] ${type} ${path ?? "unknown"}: ${error.message}`
+          );
+        }
+      },
+    })
   );
   if (process.env.NODE_ENV === "development") await setupVite(app, server);
   else serveStatic(app);

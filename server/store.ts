@@ -46,11 +46,13 @@ export type GpsPoint = {
 export type StoredUser = {
   id: string;
   name: string;
+  username: string;
   email: string;
   phone: string;
   role: Role;
   passwordHash: string;
   active: boolean;
+  mustChangePassword: boolean;
   createdAt: string;
   lastSignedIn: string | null;
 };
@@ -148,7 +150,15 @@ export function readStore(): Store {
     if (!existsSync(dataFile)) return blankStore();
     const parsed = JSON.parse(readFileSync(dataFile, "utf8")) as Store;
     if (parsed.version !== 1) return blankStore();
-    return { ...blankStore(), ...parsed };
+    return {
+      ...blankStore(),
+      ...parsed,
+      users: (parsed.users ?? []).map(user => ({
+        ...user,
+        username: user.username ?? "",
+        mustChangePassword: user.mustChangePassword ?? false,
+      })),
+    };
   } catch (error) {
     console.error("[Store] Could not read data file:", error);
     return blankStore();
@@ -173,12 +183,14 @@ export function publicUser(user: StoredUser) {
   return {
     id: user.id,
     name: user.name,
+    username: user.username ?? "",
     email: user.email,
     phone: user.phone,
     role: user.role,
     active: user.active,
     createdAt: user.createdAt,
     lastSignedIn: user.lastSignedIn,
+    mustChangePassword: user.mustChangePassword ?? false,
   };
 }
 
@@ -204,24 +216,35 @@ export function verifyPassword(password: string, storedHash: string) {
 
 export function createUser(input: {
   name: string;
-  email: string;
+  username?: string;
+  email?: string;
   phone?: string;
   role: Role;
   password: string;
 }) {
   const now = new Date().toISOString();
   return withStore(store => {
-    const email = normalizeEmail(input.email);
-    if (store.users.some(user => user.email === email))
+    const email = normalizeEmail(input.email ?? "");
+    const username = input.username?.trim() ?? "";
+    if (email && store.users.some(user => user.email === email))
       throw new Error("An account with this email already exists");
+    if (
+      username &&
+      store.users.some(
+        user => (user.username ?? "").toLowerCase() === username.toLowerCase()
+      )
+    )
+      throw new Error("An account with this username already exists");
     const user: StoredUser = {
       id: randomUUID(),
       name: input.name.trim(),
+      username,
       email,
       phone: input.phone?.trim() ?? "",
       role: input.role,
       passwordHash: hashPassword(input.password),
       active: true,
+      mustChangePassword: false,
       createdAt: now,
       lastSignedIn: null,
     };
@@ -232,6 +255,49 @@ export function createUser(input: {
 
 export function findUserByEmail(email: string, store = readStore()) {
   return store.users.find(user => user.email === normalizeEmail(email));
+}
+
+export function findUserByIdentifier(identifier: string, store = readStore()) {
+  const normalized = identifier.trim().toLowerCase();
+  return store.users.find(
+    user =>
+      user.email.toLowerCase() === normalized ||
+      (!!user.username && user.username.toLowerCase() === normalized)
+  );
+}
+
+export function bootstrapOwnerFromEnvironment() {
+  const configuredUsername = process.env.NAZMI_BOOTSTRAP_USERNAME?.trim();
+  const configuredName = process.env.NAZMI_BOOTSTRAP_OWNER_NAME?.trim();
+  const password = process.env.NAZMI_BOOTSTRAP_PASSWORD;
+  if (!configuredUsername || !configuredName || !password) return false;
+  return withStore(store => {
+    if (store.users.some(user => user.username?.toLowerCase() === "ahmed"))
+      return false;
+    const now = new Date().toISOString();
+    const user: StoredUser = {
+      id: randomUUID(),
+      name: "Ahsan Ahmed",
+      username: "Ahmed",
+      email: "",
+      phone: "",
+      role: "Owner",
+      passwordHash: hashPassword(password),
+      active: true,
+      mustChangePassword: true,
+      createdAt: now,
+      lastSignedIn: null,
+    };
+    store.users.push(user);
+    addAudit(store, {
+      action: "owner_bootstrap",
+      actorId: null,
+      actorName: "System",
+      targetId: user.id,
+      details: "Initial Owner account bootstrapped",
+    });
+    return true;
+  });
 }
 
 export function findUserById(id: string, store = readStore()) {
@@ -267,6 +333,15 @@ export function deleteSession(token: string | undefined) {
   withStore(store => {
     store.sessions = store.sessions.filter(
       session => session.tokenHash !== hashToken(token)
+    );
+  });
+}
+
+export function revokeOtherSessions(userId: string, currentToken: string) {
+  const currentHash = hashToken(currentToken);
+  withStore(store => {
+    store.sessions = store.sessions.filter(
+      session => session.userId !== userId || session.tokenHash === currentHash
     );
   });
 }
