@@ -1,0 +1,3 @@
+In-app Browser JS state was preserved. Completed actions were not rolled back; refresh stale UI handles and continue only the remaining work.
+{"code":"BROWSER_ERROR","method":"browser_upload_file","callIndex":2,"nextAction":"inspect_before_retry"}
+upload file is not available: C:\Users\PC\Documents\Manus\2026-10-30\79jH8d

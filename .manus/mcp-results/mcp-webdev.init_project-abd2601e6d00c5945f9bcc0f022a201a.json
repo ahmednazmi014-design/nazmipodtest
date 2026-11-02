@@ -1,0 +1,1 @@
+{"content":[{"type":"text","text":"The Webdev operation is not permitted for the current project identity."}],"structuredContent":{"webdev_error":{"schema":"manus.webdev.model_error/v1","code":"permission_denied","retryable":false}},"isError":true}
