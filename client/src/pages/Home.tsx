@@ -1,308 +1,2219 @@
-import { useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   Activity,
   AlertTriangle,
-  Archive,
-  ArrowDownRight,
-  ArrowUpRight,
-  BadgeCheck,
+  ArrowRight,
+  BarChart3,
   Bell,
-  CalendarDays,
-  Camera,
   Check,
   ChevronDown,
-  ChevronRight,
-  CircleDollarSign,
+  CircleUserRound,
   ClipboardCheck,
-  Clock3,
-  Command,
   Download,
   FileCheck2,
   FileText,
-  Filter,
-  Gauge,
   Globe2,
   LayoutDashboard,
+  Link2,
   LogOut,
   MapPin,
   Menu,
-  MoreHorizontal,
   PackageCheck,
-  PanelLeft,
   Plus,
   RefreshCw,
   Search,
-  Send,
   Settings2,
   ShieldCheck,
   Truck,
-  UploadCloud,
-  UserRound,
+  UserPlus,
   UsersRound,
   X,
+  Zap,
 } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip as ChartTooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
-type DeliveryStatus =
-  | "Out for Delivery"
-  | "Arrived"
-  | "Delivered"
-  | "Partially Delivered"
-  | "Failed"
-  | "Pending Verification"
-  | "Scheduled";
-
+const roles = [
+  "Owner",
+  "Director",
+  "Dispatch Manager",
+  "Dispatch Staff",
+  "Delivery Supervisor",
+  "Driver",
+  "Accounts",
+  "Custom",
+] as const;
+const statuses = [
+  "Scheduled",
+  "Ready for Dispatch",
+  "Assigned",
+  "Out for Delivery",
+  "Arrived",
+  "Delivered",
+  "Partially Delivered",
+  "Failed",
+  "Cancelled",
+] as const;
 type ViewKey =
   | "overview"
   | "deliveries"
-  | "schedule"
+  | "staff"
   | "pod"
-  | "drivers"
-  | "vehicles"
-  | "customers"
-  | "reports"
-  | "users"
-  | "notifications"
+  | "tracker"
+  | "driver"
   | "settings"
-  | "audit"
-  | "driver-mobile";
-
+  | "audit";
+type User = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  active: boolean;
+  createdAt: string;
+  lastSignedIn: string | null;
+};
 type Delivery = {
   id: string;
   customer: string;
-  destination: string;
-  driver: string;
-  vehicle: string;
-  scheduled: string;
-  status: DeliveryStatus;
-  cartons: number;
-  delivered: number;
-  proof: "Ready" | "Pending" | "Missing";
-  route: string;
+  address: string;
+  contact: string;
   challan: string;
+  reference: string;
+  product: string;
+  cartons: number;
+  deliveredCartons: number;
+  rejectedCartons: number;
+  scheduledAt: string;
+  assignedDriverId: string | null;
+  vehicle: string;
+  route: string;
+  status: string;
+  notes: string;
+  proofStatus: string;
+  proofNotes: string;
+  photos: string[];
+  gps: {
+    lat: number;
+    lng: number;
+    accuracy: number | null;
+    speed: number | null;
+    heading: number | null;
+    recordedAt: string;
+  } | null;
+  gpsTrailCount: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  verifiedAt: string | null;
+  driver: { id: string; name: string; phone: string } | null;
 };
 
-const statusColors: Record<string, string> = {
-  Delivered: "status-good",
-  "Pending Verification": "status-review",
-  "Partially Delivered": "status-partial",
-  Failed: "status-failed",
-  "Out for Delivery": "status-live",
-  Arrived: "status-live",
-  Scheduled: "status-neutral",
-};
+type Lang = "EN" | "UR";
+const ui = {
+  EN: {
+    dashboard: "Dashboard",
+    deliveries: "Deliveries",
+    staff: "Staff",
+    pod: "POD verification",
+    tracker: "Live tracker",
+    settings: "Company settings",
+    audit: "Audit log",
+    driver: "My route",
+    signOut: "Sign out",
+    newDelivery: "New delivery",
+    search: "Search deliveries",
+    noRecords: "No records yet",
+    save: "Save changes",
+    cancel: "Cancel",
+    loading: "Loading…",
+  },
+  UR: {
+    dashboard: "ڈیش بورڈ",
+    deliveries: "ڈیلیوریز",
+    staff: "عملہ",
+    pod: "POD تصدیق",
+    tracker: "لائیو ٹریکر",
+    settings: "کمپنی سیٹنگز",
+    audit: "آڈٹ لاگ",
+    driver: "میرا روٹ",
+    signOut: "سائن آؤٹ",
+    newDelivery: "نئی ڈیلیوری",
+    search: "ڈیلیوری تلاش کریں",
+    noRecords: "ابھی کوئی ریکارڈ نہیں",
+    save: "تبدیلی محفوظ کریں",
+    cancel: "منسوخ",
+    loading: "لوڈ ہو رہا ہے…",
+  },
+} as const;
 
-const initialDeliveries: Delivery[] = [
-  { id: "NAZ-POD-2026-0148", customer: "Atlas Foods (Pvt.) Ltd.", destination: "Korangi Industrial Area", driver: "Bilal Ahmed", vehicle: "LEA-8421", scheduled: "Today · 09:30", status: "Delivered", cartons: 420, delivered: 420, proof: "Ready", route: "Route 01", challan: "CH-260148" },
-  { id: "NAZ-POD-2026-0149", customer: "Nexus Retail Group", destination: "SITE Area, Karachi", driver: "Ahsan Raza", vehicle: "KHI-1187", scheduled: "Today · 10:15", status: "Pending Verification", cartons: 280, delivered: 280, proof: "Ready", route: "Route 02", challan: "CH-260149" },
-  { id: "NAZ-POD-2026-0150", customer: "Green Basket Trading", destination: "North Nazimabad", driver: "Usman Khan", vehicle: "LEA-7710", scheduled: "Today · 11:00", status: "Partially Delivered", cartons: 600, delivered: 480, proof: "Ready", route: "Route 03", challan: "CH-260150" },
-  { id: "NAZ-POD-2026-0151", customer: "PakBuild Materials", destination: "Hub Industrial Estate", driver: "Bilal Ahmed", vehicle: "LEA-8421", scheduled: "Today · 12:30", status: "Out for Delivery", cartons: 350, delivered: 0, proof: "Pending", route: "Route 01", challan: "CH-260151" },
-  { id: "NAZ-POD-2026-0152", customer: "Harbor Wholesale", destination: "Clifton Block 2", driver: "Imran Shah", vehicle: "KHI-2291", scheduled: "Today · 13:15", status: "Arrived", cartons: 160, delivered: 0, proof: "Pending", route: "Route 04", challan: "CH-260152" },
-  { id: "NAZ-POD-2026-0153", customer: "MetroMart Distribution", destination: "Federal B Area", driver: "Usman Khan", vehicle: "LEA-7710", scheduled: "Today · 14:00", status: "Scheduled", cartons: 520, delivered: 0, proof: "Missing", route: "Route 03", challan: "CH-260153" },
-  { id: "NAZ-POD-2026-0154", customer: "Prime Hospitality", destination: "DHA Phase 6", driver: "Ahsan Raza", vehicle: "KHI-1187", scheduled: "Tomorrow · 09:00", status: "Scheduled", cartons: 190, delivered: 0, proof: "Missing", route: "Route 02", challan: "CH-260154" },
-  { id: "NAZ-POD-2026-0155", customer: "Crescent Paper Co.", destination: "Landhi", driver: "Unassigned", vehicle: "Unassigned", scheduled: "Tomorrow · 10:30", status: "Scheduled", cartons: 740, delivered: 0, proof: "Missing", route: "Unassigned", challan: "CH-260155" },
-];
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("en-PK", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map(part => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+function canManage(role: string) {
+  return ["Owner", "Director", "Dispatch Manager", "Dispatch Staff"].includes(
+    role
+  );
+}
+function canVerify(role: string) {
+  return [
+    "Owner",
+    "Director",
+    "Delivery Supervisor",
+    "Dispatch Manager",
+  ].includes(role);
+}
+function statusTone(status: string) {
+  return status.toLowerCase().replaceAll(" ", "-");
+}
+function downloadPod(id: string) {
+  window.location.href = `/api/pod/${encodeURIComponent(id)}.pdf`;
+}
 
-const volumeData = [
-  { day: "Mon", delivered: 44, partial: 5, failed: 3 },
-  { day: "Tue", delivered: 51, partial: 4, failed: 2 },
-  { day: "Wed", delivered: 48, partial: 7, failed: 4 },
-  { day: "Thu", delivered: 62, partial: 5, failed: 2 },
-  { day: "Fri", delivered: 58, partial: 6, failed: 3 },
-  { day: "Sat", delivered: 35, partial: 3, failed: 1 },
-  { day: "Sun", delivered: 0, partial: 0, failed: 0 },
-];
-
-const driverRows = [
-  { name: "Bilal Ahmed", initials: "BA", assigned: 18, completed: 16, partial: 1, failed: 1, onTime: "89%", tone: "emerald" },
-  { name: "Ahsan Raza", initials: "AR", assigned: 15, completed: 13, partial: 1, failed: 0, onTime: "93%", tone: "indigo" },
-  { name: "Usman Khan", initials: "UK", assigned: 16, completed: 12, partial: 2, failed: 1, onTime: "81%", tone: "amber" },
-  { name: "Imran Shah", initials: "IS", assigned: 12, completed: 10, partial: 0, failed: 1, onTime: "86%", tone: "slate" },
-];
-
-type NavItem = { key: string; label: string; icon: typeof Activity; count?: string };
-type NavSection = { label: string; items: NavItem[] };
-
-const navSections: NavSection[] = [
-  { label: "Command", items: [{ key: "overview", label: "Owner dashboard", icon: LayoutDashboard }] },
-  { label: "Operations", items: [
-    { key: "deliveries", label: "Deliveries", icon: PackageCheck, count: "24" },
-    { key: "schedule", label: "Schedule & routes", icon: CalendarDays },
-    { key: "pod", label: "Proof of delivery", icon: FileCheck2, count: "6" },
-  ] },
-  { label: "Network", items: [
-    { key: "drivers", label: "Drivers", icon: UserRound },
-    { key: "vehicles", label: "Vehicles", icon: Truck },
-    { key: "customers", label: "Customers", icon: UsersRound },
-  ] },
-  { label: "Control", items: [
-    { key: "reports", label: "Reports & analytics", icon: Activity },
-    { key: "users", label: "Users & permissions", icon: ShieldCheck },
-    { key: "notifications", label: "Notifications", icon: Bell, count: "4" },
-    { key: "audit", label: "Audit log", icon: Archive },
-    { key: "settings", label: "Owner settings", icon: Settings2 },
-  ] },
-];
-
-const formatNumber = (value: number) => new Intl.NumberFormat("en-US").format(value);
-
-function BrandMark() {
+function Brand() {
   return (
-    <div className="brand-lockup">
-      <div className="brand-mark"><span>N</span><div className="brand-check" /></div>
-      <div><div className="brand-name">NAZMI POD</div><div className="brand-subtitle">Delivery control</div></div>
+    <div className="brand">
+      <span className="brand-mark">
+        N<span>✓</span>
+      </span>
+      <span>
+        <b>NAZMI POD</b>
+        <small>Delivery control</small>
+      </span>
+    </div>
+  );
+}
+function StatusPill({ status }: { status: string }) {
+  return (
+    <span className={`status-pill ${statusTone(status)}`}>
+      <i />
+      {status}
+    </span>
+  );
+}
+function Avatar({ name }: { name: string }) {
+  return <span className="avatar">{initials(name)}</span>;
+}
+function Field({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: string;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      {children}
+      {hint && <small>{hint}</small>}
+    </label>
+  );
+}
+function Button({
+  children,
+  variant = "primary",
+  onClick,
+  type = "button",
+  disabled = false,
+}: {
+  children: ReactNode;
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+  onClick?: () => void;
+  type?: "button" | "submit";
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type={type}
+      className={`button ${variant}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {children}
+    </button>
+  );
+}
+function PageHeading({
+  eyebrow,
+  title,
+  detail,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  detail: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="page-heading">
+      <div>
+        <span className="eyebrow">{eyebrow}</span>
+        <h1>{title}</h1>
+        <p>{detail}</p>
+      </div>
+      {action}
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  return <span className={`status-badge ${statusColors[status] ?? "status-neutral"}`}><span className="status-dot" />{status}</span>;
+function AuthScreen({
+  setupRequired,
+  onComplete,
+}: {
+  setupRequired: boolean;
+  onComplete: () => void;
+}) {
+  const [setup, setSetup] = useState(setupRequired);
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    password: "",
+    confirm: "",
+  });
+  const login = trpc.auth.login.useMutation({ onSuccess: onComplete });
+  const ownerSetup = trpc.auth.setup.useMutation({ onSuccess: onComplete });
+  const pending = login.isPending || ownerSetup.isPending;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (setup) {
+      if (form.password !== form.confirm)
+        return toast.error("Passwords do not match.");
+      ownerSetup.mutate({
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        password: form.password,
+      });
+    } else login.mutate({ email: form.email, password: form.password });
+  };
+  return (
+    <main className="auth-shell">
+      <div className="auth-side">
+        <Brand />
+        <div className="auth-message">
+          <span className="eyebrow">NAZMI PACKAGING COMPANY</span>
+          <h1>Every handover, accounted for.</h1>
+          <p>
+            A secure operations workspace for dispatch, riders and proof of
+            delivery.
+          </p>
+          <div className="auth-points">
+            <span>
+              <Check size={15} />
+              Password-protected access
+            </span>
+            <span>
+              <Check size={15} />
+              Carton-level POD records
+            </span>
+            <span>
+              <Check size={15} />
+              Live rider location when shared
+            </span>
+          </div>
+        </div>
+      </div>
+      <section className="auth-card">
+        <span className="eyebrow">
+          {setup ? "FIRST-TIME OWNER SETUP" : "SECURE SIGN IN"}
+        </span>
+        <h2>{setup ? "Create the Owner account" : "Sign in to NAZMI POD"}</h2>
+        <p>
+          {setup
+            ? "Set a password for the company Owner. No sample account or hardcoded login is used."
+            : "Use your company email and password to continue."}
+        </p>
+        <form onSubmit={submit}>
+          {setup && (
+            <>
+              <Field label="Full name">
+                <input
+                  required
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="Your full name"
+                />
+              </Field>
+              <Field label="Phone (optional)">
+                <input
+                  value={form.phone}
+                  onChange={e => setForm({ ...form, phone: e.target.value })}
+                  placeholder="+92…"
+                />
+              </Field>
+            </>
+          )}
+          <Field label="Email">
+            <input
+              required
+              type="email"
+              value={form.email}
+              onChange={e => setForm({ ...form, email: e.target.value })}
+              placeholder="you@company.com"
+            />
+          </Field>
+          <Field
+            label="Password"
+            hint={setup ? "At least 8 characters" : undefined}
+          >
+            <input
+              required
+              type="password"
+              minLength={setup ? 8 : 1}
+              value={form.password}
+              onChange={e => setForm({ ...form, password: e.target.value })}
+              placeholder="Enter password"
+            />
+          </Field>
+          {setup && (
+            <Field label="Confirm password">
+              <input
+                required
+                type="password"
+                minLength={8}
+                value={form.confirm}
+                onChange={e => setForm({ ...form, confirm: e.target.value })}
+                placeholder="Repeat password"
+              />
+            </Field>
+          )}
+          <Button type="submit" disabled={pending}>
+            {pending
+              ? "Please wait…"
+              : setup
+                ? "Create Owner account"
+                : "Sign in"}
+            <ArrowRight size={16} />
+          </Button>
+        </form>
+        <button className="auth-switch" onClick={() => setSetup(!setup)}>
+          {setup ? "Already set up? Sign in" : "First time here? Owner setup"}
+        </button>
+        <small className="auth-foot">
+          Sessions are encrypted in an httpOnly cookie. Contact the Owner to add
+          staff or reset access.
+        </small>
+      </section>
+    </main>
+  );
 }
 
-function MetricCard({ label, value, hint, icon: Icon, tone = "emerald", trend }: { label: string; value: string; hint: string; icon: typeof Activity; tone?: string; trend?: string }) {
-  return <div className={`metric-card metric-${tone}`}>
-    <div className="metric-top"><span className="eyebrow">{label}</span><div className="metric-icon"><Icon size={16} /></div></div>
-    <div className="metric-value">{value}</div>
-    <div className="metric-bottom"><span>{hint}</span>{trend && <span className="metric-trend"><ArrowUpRight size={13} />{trend}</span>}</div>
-  </div>;
+function Dashboard({
+  summary,
+  deliveries,
+  user,
+  navigate,
+  lang,
+}: {
+  summary: any;
+  deliveries: Delivery[];
+  user: User;
+  navigate: (view: ViewKey) => void;
+  lang: Lang;
+}) {
+  const t = ui[lang];
+  const completion = summary?.cartons
+    ? Math.round((summary.deliveredCartons / summary.cartons) * 100)
+    : 0;
+  return (
+    <>
+      <PageHeading
+        eyebrow={lang === "UR" ? "آپریشنز / جائزہ" : "Operations / overview"}
+        title={
+          lang === "UR"
+            ? `خوش آمدید، ${user.name.split(" ")[0]}`
+            : `Good to see you, ${user.name.split(" ")[0]}.`
+        }
+        detail={
+          lang === "UR"
+            ? "آج کی ڈیلیوری آپریشن ایک نظر میں۔"
+            : "Your delivery operation at a glance, from dispatch to verified handover."
+        }
+        action={
+          canManage(user.role) && (
+            <Button onClick={() => navigate("deliveries")}>
+              <Plus size={16} />
+              {t.newDelivery}
+            </Button>
+          )
+        }
+      />
+      <div className="health-banner">
+        <span className="live-dot" />
+        <div>
+          <b>Live operations connected</b>
+          <small>Server data is active. No sample records are shown.</small>
+        </div>
+        <span className="health-right">{summary?.staff ?? 0} active staff</span>
+      </div>
+      <div className="metric-grid">
+        <Metric
+          label="Total deliveries"
+          value={summary?.total ?? 0}
+          hint="All current records"
+          icon={<PackageCheck />}
+        />
+        <Metric
+          label="Delivered"
+          value={summary?.delivered ?? 0}
+          hint={`${completion}% of dispatched cartons`}
+          icon={<Check />}
+          tone="blue"
+        />
+        <Metric
+          label="Active on route"
+          value={summary?.active ?? 0}
+          hint="Out for delivery / arrived"
+          icon={<Truck />}
+          tone="amber"
+        />
+        <Metric
+          label="POD review queue"
+          value={summary?.pendingVerification ?? 0}
+          hint="Evidence awaiting verification"
+          icon={<ClipboardCheck />}
+          tone="coral"
+        />
+      </div>
+      <div className="split-grid">
+        <section className="panel">
+          <PanelTitle
+            eyebrow="Today"
+            title="Priority deliveries"
+            action={
+              <Button variant="ghost" onClick={() => navigate("deliveries")}>
+                View all <ArrowRight size={15} />
+              </Button>
+            }
+          />
+          {deliveries.length === 0 ? (
+            <EmptyState
+              text={t.noRecords}
+              action={
+                canManage(user.role) ? (
+                  <Button onClick={() => navigate("deliveries")}>
+                    <Plus size={15} />
+                    Create first delivery
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <DeliveryTable
+              deliveries={deliveries.slice(0, 6)}
+              onSelect={() => navigate("deliveries")}
+            />
+          )}
+        </section>
+        <section className="panel">
+          <PanelTitle eyebrow="Workflow" title="At a glance" />
+          <div className="progress-card">
+            <div className="progress-ring">
+              <strong>{completion}%</strong>
+              <small>cartons delivered</small>
+            </div>
+            <div className="progress-list">
+              <span>
+                <i className="dot green" />
+                Delivered <b>{summary?.delivered ?? 0}</b>
+              </span>
+              <span>
+                <i className="dot amber" />
+                Partial <b>{summary?.partial ?? 0}</b>
+              </span>
+              <span>
+                <i className="dot red" />
+                Failed <b>{summary?.failed ?? 0}</b>
+              </span>
+              <span>
+                <i className="dot gray" />
+                In progress <b>{summary?.active ?? 0}</b>
+              </span>
+            </div>
+          </div>
+          <div className="quick-links">
+            <button onClick={() => navigate("pod")}>
+              <FileCheck2 size={17} />
+              <span>Review pending PODs</span>
+              <ArrowRight size={15} />
+            </button>
+            <button onClick={() => navigate("tracker")}>
+              <MapPin size={17} />
+              <span>Open live tracker</span>
+              <ArrowRight size={15} />
+            </button>
+            <button onClick={() => navigate("staff")}>
+              <UsersRound size={17} />
+              <span>Manage staff access</span>
+              <ArrowRight size={15} />
+            </button>
+          </div>
+        </section>
+      </div>
+    </>
+  );
 }
-
-function SectionHeader({ kicker, title, detail, action }: { kicker: string; title: string; detail?: string; action?: React.ReactNode }) {
-  return <div className="section-header"><div><div className="eyebrow">{kicker}</div><h1>{title}</h1>{detail && <p>{detail}</p>}</div>{action}</div>;
-}
-
-function OwnerOverview({ deliveries, onNavigate }: { deliveries: Delivery[]; onNavigate: (view: ViewKey) => void }) {
-  const counts = useMemo(() => ({
-    total: deliveries.length + 16,
-    delivered: deliveries.filter(d => d.status === "Delivered" || d.status === "Pending Verification").length + 13,
-    failed: 3,
-    partial: deliveries.filter(d => d.status === "Partially Delivered").length + 4,
-    live: deliveries.filter(d => d.status === "Out for Delivery" || d.status === "Arrived").length,
-    pendingProof: deliveries.filter(d => d.proof === "Pending" || d.proof === "Missing").length,
-  }), [deliveries]);
-  const donutData = [{ name: "Delivered", value: 72, color: "#0a7b61" }, { name: "Partial", value: 12, color: "#c88a22" }, { name: "Failed", value: 6, color: "#c5564d" }, { name: "Open", value: 10, color: "#cbd5d1" }];
-
-  return <>
-    <SectionHeader kicker="Thursday · 30 October 2026 · Asia/Karachi" title="Good evening, Ahsan." detail="Here is the delivery operation at a glance. Demo records are clearly marked while you configure the system." action={<button className="primary-button" onClick={() => onNavigate("deliveries")}><Plus size={16} />New delivery</button>} />
-    <div className="demo-strip"><div className="demo-pulse" /><strong>DEMO MODE</strong><span>Analytics below are computed from the current demonstration records.</span><button onClick={() => onNavigate("settings")}>Configure production →</button></div>
-    <div className="metrics-grid">
-      <MetricCard label="Total deliveries" value={formatNumber(counts.total)} hint="All active records" icon={PackageCheck} trend="12.4%" />
-      <MetricCard label="Delivered / verified" value={formatNumber(counts.delivered)} hint="This operating period" icon={BadgeCheck} tone="blue" trend="8.1%" />
-      <MetricCard label="Out on route" value={formatNumber(counts.live)} hint="Live assignments" icon={Truck} tone="amber" />
-      <MetricCard label="Pending proof" value={formatNumber(counts.pendingProof)} hint="Needs evidence or review" icon={ClipboardCheck} tone="coral" />
+function Metric({
+  label,
+  value,
+  hint,
+  icon,
+  tone = "green",
+}: {
+  label: string;
+  value: number;
+  hint: string;
+  icon: ReactNode;
+  tone?: string;
+}) {
+  return (
+    <div className={`metric ${tone}`}>
+      <div className="metric-top">
+        <span>{label}</span>
+        <i>{icon}</i>
+      </div>
+      <strong>{value.toLocaleString()}</strong>
+      <small>{hint}</small>
     </div>
-    <div className="dashboard-grid main-chart-grid">
-      <section className="panel chart-panel"><div className="panel-heading"><div><div className="eyebrow">Delivery performance</div><h2>Volume & outcomes</h2></div><div className="segmented"><button className="active">7 days</button><button>30 days</button><button>Quarter</button></div></div><div className="legend-row"><span><i className="legend-dot delivered" />Delivered</span><span><i className="legend-dot partial" />Partial</span><span><i className="legend-dot failed" />Failed</span></div><div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={volumeData} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}><defs><linearGradient id="deliveredFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#0a7b61" stopOpacity={0.24} /><stop offset="100%" stopColor="#0a7b61" stopOpacity={0.02} /></linearGradient></defs><CartesianGrid stroke="#e7edea" vertical={false} /><XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#80918b" }} /><YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#80918b" }} /><ChartTooltip contentStyle={{ borderRadius: 12, border: "1px solid #dfe8e4", boxShadow: "0 8px 24px rgba(20,45,37,.08)" }} /><Area type="monotone" dataKey="delivered" stroke="#0a7b61" strokeWidth={2.5} fill="url(#deliveredFill)" /><Area type="monotone" dataKey="partial" stroke="#c88a22" strokeWidth={2} fill="none" /><Area type="monotone" dataKey="failed" stroke="#c5564d" strokeWidth={2} fill="none" /></AreaChart></ResponsiveContainer></div></section>
-      <section className="panel outcome-panel"><div className="panel-heading"><div><div className="eyebrow">Outcome mix</div><h2>Where the work stands</h2></div><button className="icon-button"><MoreHorizontal size={17} /></button></div><div className="donut-wrap"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={donutData} dataKey="value" innerRadius={67} outerRadius={90} paddingAngle={3} stroke="none">{donutData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}</Pie><ChartTooltip /></PieChart></ResponsiveContainer><div className="donut-center"><strong>90%</strong><span>positive</span></div></div><div className="outcome-list">{donutData.map(item => <div className="outcome-row" key={item.name}><span><i className="outcome-swatch" style={{ background: item.color }} />{item.name}</span><strong>{item.value}%</strong></div>)}</div></section>
+  );
+}
+function PanelTitle({
+  eyebrow,
+  title,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="panel-title">
+      <div>
+        <span className="eyebrow">{eyebrow}</span>
+        <h2>{title}</h2>
+      </div>
+      {action}
     </div>
-    <div className="dashboard-grid lower-grid">
-      <section className="panel table-panel"><div className="panel-heading"><div><div className="eyebrow">Live operation</div><h2>Priority deliveries</h2></div><button className="text-button" onClick={() => onNavigate("deliveries")}>View all <ChevronRight size={15} /></button></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Delivery</th><th>Customer</th><th>Driver / vehicle</th><th>Status</th><th>Proof</th></tr></thead><tbody>{deliveries.slice(0, 5).map(d => <tr key={d.id} onClick={() => onNavigate("deliveries")}><td><strong className="mono">{d.id}</strong><span className="cell-sub">{d.scheduled} · {d.route}</span></td><td><strong>{d.customer}</strong><span className="cell-sub"><MapPin size={11} />{d.destination}</span></td><td><strong>{d.driver}</strong><span className="cell-sub"><Truck size={11} />{d.vehicle}</span></td><td><StatusBadge status={d.status} /></td><td><span className={`proof-chip ${d.proof.toLowerCase()}`}><FileCheck2 size={13} />{d.proof}</span></td></tr>)}</tbody></table></div></section>
-      <section className="panel activity-panel"><div className="panel-heading"><div><div className="eyebrow">Attention queue</div><h2>Needs your eye</h2></div><span className="count-pill">4 open</span></div><div className="attention-list"><button onClick={() => onNavigate("pod")}><span className="attention-icon coral"><FileCheck2 size={16} /></span><span><strong>6 PODs awaiting verification</strong><small>Supervisor queue · updated 9 min ago</small></span><ChevronRight size={15} /></button><button onClick={() => onNavigate("deliveries")}><span className="attention-icon amber"><AlertTriangle size={16} /></span><span><strong>1 partial delivery needs follow-up</strong><small>Green Basket Trading · 120 cartons</small></span><ChevronRight size={15} /></button><button onClick={() => onNavigate("schedule")}><span className="attention-icon blue"><CalendarDays size={16} /></span><span><strong>1 delivery remains unassigned</strong><small>Crescent Paper Co. · tomorrow 10:30</small></span><ChevronRight size={15} /></button><button onClick={() => onNavigate("vehicles")}><span className="attention-icon slate"><Truck size={16} /></span><span><strong>LEA-5192 maintenance due</strong><small>Service window · 02 Nov 2026</small></span><ChevronRight size={15} /></button></div></section>
+  );
+}
+function EmptyState({ text, action }: { text: string; action?: ReactNode }) {
+  return (
+    <div className="empty-state">
+      <PackageCheck size={22} />
+      <p>{text}</p>
+      {action}
     </div>
-    <section className="panel driver-panel"><div className="panel-heading"><div><div className="eyebrow">Field performance</div><h2>Driver pulse</h2></div><button className="text-button" onClick={() => onNavigate("drivers")}>Open driver management <ChevronRight size={15} /></button></div><div className="driver-table"><div className="driver-head"><span>Driver</span><span>Assigned</span><span>Completed</span><span>Partial</span><span>Failed</span><span>On time</span></div>{driverRows.map(row => <div className="driver-row" key={row.name}><div className="driver-name"><span className={`avatar avatar-${row.tone}`}>{row.initials}</span><strong>{row.name}</strong></div><span>{row.assigned}</span><span className="good-text">{row.completed}</span><span className="amber-text">{row.partial}</span><span className={row.failed ? "coral-text" : "muted-text"}>{row.failed}</span><span className="on-time"><span className="mini-progress"><i style={{ width: row.onTime }} /></span>{row.onTime}</span></div>)}</div></section>
-  </>;
+  );
+}
+function DeliveryTable({
+  deliveries,
+  onSelect,
+}: {
+  deliveries: Delivery[];
+  onSelect: (delivery: Delivery) => void;
+}) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Delivery</th>
+            <th>Customer</th>
+            <th>Driver</th>
+            <th>Load</th>
+            <th>Status</th>
+            <th>POD</th>
+          </tr>
+        </thead>
+        <tbody>
+          {deliveries.map(delivery => (
+            <tr key={delivery.id} onClick={() => onSelect(delivery)}>
+              <td>
+                <b className="mono">{delivery.id}</b>
+                <small>{delivery.challan}</small>
+              </td>
+              <td>
+                <b>{delivery.customer}</b>
+                <small>
+                  <MapPin size={11} />
+                  {delivery.address}
+                </small>
+              </td>
+              <td>
+                {delivery.driver ? (
+                  <span className="person-cell">
+                    <Avatar name={delivery.driver.name} />
+                    {delivery.driver.name}
+                  </span>
+                ) : (
+                  <span className="muted">Unassigned</span>
+                )}
+              </td>
+              <td>
+                <b>
+                  {delivery.deliveredCartons}/{delivery.cartons}
+                </b>
+                <small>cartons</small>
+              </td>
+              <td>
+                <StatusPill status={delivery.status} />
+              </td>
+              <td>
+                <span
+                  className={`proof-tag ${delivery.proofStatus.toLowerCase()}`}
+                >
+                  <FileCheck2 size={12} />
+                  {delivery.proofStatus}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
-function DeliveriesView({ deliveries, setDeliveries, onSelect }: { deliveries: Delivery[]; setDeliveries: React.Dispatch<React.SetStateAction<Delivery[]>>; onSelect: (delivery: Delivery) => void }) {
+function DeliveriesView({
+  deliveries,
+  staff,
+  user,
+  navigate,
+}: {
+  deliveries: Delivery[];
+  staff: User[];
+  user: User;
+  navigate: (view: ViewKey) => void;
+}) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("All statuses");
-  const filtered = deliveries.filter(d => (status === "All statuses" || d.status === status) && [d.id, d.customer, d.driver, d.destination].join(" ").toLowerCase().includes(query.toLowerCase()));
-  return <>
-    <SectionHeader kicker="Operations / delivery register" title="Delivery management" detail="Every delivery record, assignment and status event in one place." action={<button className="primary-button"><Plus size={16} />Create delivery</button>} />
-    <div className="toolbar"><div className="search-box"><Search size={16} /><input placeholder="Search ID, customer, driver or destination" value={query} onChange={e => setQuery(e.target.value)} /></div><select value={status} onChange={e => setStatus(e.target.value)}><option>All statuses</option>{Object.keys(statusColors).map(s => <option key={s}>{s}</option>)}</select><button className="secondary-button"><Filter size={15} />More filters</button><button className="secondary-button"><Download size={15} />Export</button></div>
-    <div className="panel table-panel"><div className="table-meta"><span><strong>{filtered.length}</strong> visible records · <span className="demo-text">DEMO</span></span><span className="sync-state"><span className="sync-dot" />Live data source ready</span></div><div className="table-scroll"><table className="data-table delivery-table"><thead><tr><th><input type="checkbox" /></th><th>Delivery ID</th><th>Customer / destination</th><th>Scheduled</th><th>Driver / vehicle</th><th>Load</th><th>Status</th><th>Proof</th><th /></tr></thead><tbody>{filtered.map(d => <tr key={d.id} onClick={() => onSelect(d)}><td><input type="checkbox" onClick={e => e.stopPropagation()} /></td><td><strong className="mono">{d.id}</strong><span className="cell-sub">{d.challan}</span></td><td><strong>{d.customer}</strong><span className="cell-sub"><MapPin size={11} />{d.destination}</span></td><td><strong>{d.scheduled.split(" · ")[0]}</strong><span className="cell-sub">{d.scheduled.split(" · ")[1]}</span></td><td><strong>{d.driver}</strong><span className="cell-sub"><Truck size={11} />{d.vehicle}</span></td><td><strong>{d.delivered}/{d.cartons}</strong><span className="cell-sub">cartons</span></td><td><StatusBadge status={d.status} /></td><td><span className={`proof-chip ${d.proof.toLowerCase()}`}><FileCheck2 size={13} />{d.proof}</span></td><td><button className="icon-button" onClick={e => e.stopPropagation()}><MoreHorizontal size={16} /></button></td></tr>)}</tbody></table></div></div>
-    <div className="quick-actions"><button onClick={() => setDeliveries(current => current.map(d => d.id === "NAZ-POD-2026-0150" ? { ...d, status: "Pending Verification", proof: "Ready" } : d))}><RefreshCw size={15} />Mark partial follow-up ready</button><button><UploadCloud size={15} />Import from Excel</button><button><FileText size={15} />Open complete history</button></div>
-  </>;
+  const [showCreate, setShowCreate] = useState(false);
+  const [selected, setSelected] = useState<Delivery | null>(null);
+  const create = trpc.deliveries.create.useMutation({
+    onSuccess: () => {
+      toast.success("Delivery created");
+      setShowCreate(false);
+      navigate("deliveries");
+    },
+  });
+  const utils = trpc.useUtils();
+  useEffect(() => {
+    if (create.isSuccess) {
+      void utils.deliveries.list.invalidate();
+      void utils.dashboard.summary.invalidate();
+      create.reset();
+    }
+  }, [create.isSuccess, create, utils]);
+  const filtered = deliveries.filter(
+    d =>
+      (status === "All statuses" || d.status === status) &&
+      [d.id, d.customer, d.address, d.challan, d.driver?.name ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(query.toLowerCase())
+  );
+  return (
+    <>
+      <PageHeading
+        eyebrow="Operations / delivery register"
+        title="Deliveries"
+        detail="Create, assign, track and complete every delivery with a server-side status history."
+        action={
+          canManage(user.role) && (
+            <Button onClick={() => setShowCreate(true)}>
+              <Plus size={16} />
+              New delivery
+            </Button>
+          )
+        }
+      />
+      <div className="toolbar">
+        <div className="search">
+          <Search size={16} />
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search ID, customer, driver or address"
+          />
+        </div>
+        <select value={status} onChange={e => setStatus(e.target.value)}>
+          <option>All statuses</option>
+          {statuses.map(item => (
+            <option key={item}>{item}</option>
+          ))}
+        </select>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            const csv = [
+              "Delivery,Customer,Status,Cartons,Delivered,Driver",
+              ...filtered.map(d =>
+                [
+                  d.id,
+                  d.customer,
+                  d.status,
+                  d.cartons,
+                  d.deliveredCartons,
+                  d.driver?.name ?? "",
+                ]
+                  .map(value => `"${String(value).replaceAll('"', '""')}"`)
+                  .join(",")
+              ),
+            ].join("\n");
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+            a.download = "nazmi-deliveries.csv";
+            a.click();
+          }}
+        >
+          {" "}
+          <Download size={15} />
+          Export CSV
+        </Button>
+      </div>
+      <section className="panel">
+        <div className="table-meta">
+          <span>
+            <b>{filtered.length}</b> records
+          </span>
+          <span className="muted">Server-synced</span>
+        </div>
+        {filtered.length ? (
+          <DeliveryTable deliveries={filtered} onSelect={setSelected} />
+        ) : (
+          <EmptyState text="No deliveries match this filter." />
+        )}
+      </section>
+      {showCreate && (
+        <CreateDeliveryModal
+          staff={staff}
+          onClose={() => setShowCreate(false)}
+          onSubmit={input => create.mutate(input)}
+          pending={create.isPending}
+        />
+      )}
+      {selected && (
+        <DeliveryDrawer
+          delivery={selected}
+          user={user}
+          onClose={() => setSelected(null)}
+        />
+      )}
+    </>
+  );
+}
+function CreateDeliveryModal({
+  staff,
+  onClose,
+  onSubmit,
+  pending,
+}: {
+  staff: User[];
+  onClose: () => void;
+  onSubmit: (input: any) => void;
+  pending: boolean;
+}) {
+  const [form, setForm] = useState({
+    customer: "",
+    address: "",
+    contact: "",
+    challan: "",
+    reference: "",
+    product: "",
+    cartons: "",
+    scheduledAt: "",
+    assignedDriverId: "",
+    vehicle: "",
+    route: "",
+    notes: "",
+  });
+  const set = (key: string, value: string) =>
+    setForm(current => ({ ...current, [key]: value }));
+  return (
+    <Modal title="Create delivery" onClose={onClose}>
+      <form
+        className="form-grid"
+        onSubmit={e => {
+          e.preventDefault();
+          onSubmit({
+            ...form,
+            cartons: Number(form.cartons),
+            assignedDriverId: form.assignedDriverId || null,
+          });
+        }}
+      >
+        <Field label="Customer">
+          <input
+            required
+            value={form.customer}
+            onChange={e => set("customer", e.target.value)}
+          />
+        </Field>
+        <Field label="Full address">
+          <input
+            required
+            value={form.address}
+            onChange={e => set("address", e.target.value)}
+          />
+        </Field>
+        <Field label="Challan">
+          <input
+            required
+            value={form.challan}
+            onChange={e => set("challan", e.target.value)}
+          />
+        </Field>
+        <Field label="Order / reference">
+          <input
+            value={form.reference}
+            onChange={e => set("reference", e.target.value)}
+          />
+        </Field>
+        <Field label="Product">
+          <input
+            value={form.product}
+            onChange={e => set("product", e.target.value)}
+          />
+        </Field>
+        <Field label="Cartons">
+          <input
+            required
+            type="number"
+            min="1"
+            value={form.cartons}
+            onChange={e => set("cartons", e.target.value)}
+          />
+        </Field>
+        <Field label="Scheduled date/time">
+          <input
+            required
+            type="datetime-local"
+            value={form.scheduledAt}
+            onChange={e => set("scheduledAt", e.target.value)}
+          />
+        </Field>
+        <Field label="Assign driver">
+          <select
+            value={form.assignedDriverId}
+            onChange={e => set("assignedDriverId", e.target.value)}
+          >
+            <option value="">Unassigned</option>
+            {staff
+              .filter(member => member.role === "Driver" && member.active)
+              .map(member => (
+                <option value={member.id} key={member.id}>
+                  {member.name}
+                </option>
+              ))}
+          </select>
+        </Field>
+        <Field label="Vehicle">
+          <input
+            value={form.vehicle}
+            onChange={e => set("vehicle", e.target.value)}
+          />
+        </Field>
+        <Field label="Route">
+          <input
+            value={form.route}
+            onChange={e => set("route", e.target.value)}
+            placeholder="Route 01"
+          />
+        </Field>
+        <Field label="Contact">
+          <input
+            value={form.contact}
+            onChange={e => set("contact", e.target.value)}
+          />
+        </Field>
+        <Field label="Notes">
+          <textarea
+            value={form.notes}
+            onChange={e => set("notes", e.target.value)}
+          />
+        </Field>
+        <div className="modal-actions">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending}>
+            {pending ? "Creating…" : "Create delivery"}
+            <ArrowRight size={15} />
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+function DeliveryDrawer({
+  delivery,
+  user,
+  onClose,
+}: {
+  delivery: Delivery;
+  user: User;
+  onClose: () => void;
+}) {
+  const update = trpc.deliveries.updateStatus.useMutation({
+    onSuccess: () => {
+      toast.success("Status updated");
+      onClose();
+    },
+  });
+  const verify = trpc.deliveries.verifyProof.useMutation({
+    onSuccess: () => {
+      toast.success("POD updated");
+      onClose();
+    },
+  });
+  const isDriver = user.role === "Driver";
+  const canStart = ["Scheduled", "Assigned"].includes(delivery.status);
+  const canArrive = delivery.status === "Out for Delivery";
+  return (
+    <Modal title={delivery.id} onClose={onClose}>
+      <div className="drawer-summary">
+        <StatusPill status={delivery.status} />
+        <span className={`proof-tag ${delivery.proofStatus.toLowerCase()}`}>
+          <FileCheck2 size={12} />
+          {delivery.proofStatus}
+        </span>
+      </div>
+      <div className="detail-grid">
+        <div>
+          <span>Customer</span>
+          <b>{delivery.customer}</b>
+        </div>
+        <div>
+          <span>Challan</span>
+          <b>{delivery.challan}</b>
+        </div>
+        <div>
+          <span>Address</span>
+          <b>{delivery.address}</b>
+        </div>
+        <div>
+          <span>Driver</span>
+          <b>{delivery.driver?.name ?? "Unassigned"}</b>
+        </div>
+        <div>
+          <span>Cartons</span>
+          <b>
+            {delivery.deliveredCartons} / {delivery.cartons}
+          </b>
+        </div>
+        <div>
+          <span>GPS</span>
+          <b>
+            {delivery.gps
+              ? `${delivery.gps.lat.toFixed(5)}, ${delivery.gps.lng.toFixed(5)}`
+              : "Not captured"}
+          </b>
+        </div>
+      </div>
+      <div className="detail-actions">
+        {!isDriver &&
+          delivery.proofStatus === "Ready" &&
+          canVerify(user.role) && (
+            <>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  verify.mutate({ deliveryId: delivery.id, approved: false })
+                }
+              >
+                Flag correction
+              </Button>
+              <Button
+                onClick={() =>
+                  verify.mutate({ deliveryId: delivery.id, approved: true })
+                }
+              >
+                <Check size={15} />
+                Verify POD
+              </Button>
+            </>
+          )}
+        {!isDriver && (
+          <Button variant="secondary" onClick={() => downloadPod(delivery.id)}>
+            <Download size={15} />
+            Download PDF
+          </Button>
+        )}
+        {!isDriver && canStart && (
+          <Button
+            onClick={() =>
+              update.mutate({
+                deliveryId: delivery.id,
+                status: "Out for Delivery",
+              })
+            }
+          >
+            <Truck size={15} />
+            Start delivery
+          </Button>
+        )}
+        {!isDriver && canArrive && (
+          <Button
+            variant="secondary"
+            onClick={() =>
+              update.mutate({ deliveryId: delivery.id, status: "Arrived" })
+            }
+          >
+            <MapPin size={15} />
+            Mark arrived
+          </Button>
+        )}
+      </div>
+      <div className="timeline">
+        <span>
+          <i className="done" />
+          Created <small>{formatDate(delivery.createdAt)}</small>
+        </span>
+        <span>
+          <i className={delivery.completedAt ? "done" : ""} />
+          Completed <small>{formatDate(delivery.completedAt)}</small>
+        </span>
+        <span>
+          <i className={delivery.verifiedAt ? "done" : ""} />
+          Verified <small>{formatDate(delivery.verifiedAt)}</small>
+        </span>
+      </div>
+    </Modal>
+  );
 }
 
-function DriverMobileView({ deliveries }: { deliveries: Delivery[] }) {
-  const [language, setLanguage] = useState<"EN" | "UR">("EN");
-  const [delivered, setDelivered] = useState("350");
+function StaffView({ staff, user }: { staff: User[]; user: User }) {
+  const [show, setShow] = useState(false);
+  const create = trpc.staff.create.useMutation({
+    onSuccess: () => {
+      toast.success("Staff account created");
+      setShow(false);
+    },
+  });
+  const toggle = trpc.staff.setActive.useMutation({
+    onSuccess: () => toast.success("Access updated"),
+  });
+  const [resetFor, setResetFor] = useState<User | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const reset = trpc.staff.resetPassword.useMutation({
+    onSuccess: () => {
+      toast.success("Password reset");
+      setResetFor(null);
+      setNewPassword("");
+    },
+  });
+  const utils = trpc.useUtils();
+  useEffect(() => {
+    if (create.isSuccess || toggle.isSuccess || reset.isSuccess)
+      void utils.staff.list.invalidate();
+  }, [create.isSuccess, toggle.isSuccess, reset.isSuccess, utils]);
+  return (
+    <>
+      <PageHeading
+        eyebrow="Control / access"
+        title="Staff & permissions"
+        detail="Owner-managed accounts with role-based access. Drivers only see their own assigned deliveries."
+        action={
+          canManage(user.role) && (
+            <Button onClick={() => setShow(true)}>
+              <UserPlus size={16} />
+              Add staff
+            </Button>
+          )
+        }
+      />
+      <section className="panel">
+        <div className="table-meta">
+          <span>
+            <b>{staff.length}</b> accounts
+          </span>
+          <span className="muted">Passwords are never shown</span>
+        </div>
+        <div className="staff-list">
+          {staff.map(member => (
+            <div className="staff-row" key={member.id}>
+              <Avatar name={member.name} />
+              <div className="staff-identity">
+                <b>{member.name}</b>
+                <small>
+                  {member.email} {member.phone && `· ${member.phone}`}
+                </small>
+              </div>
+              <span className="role-tag">{member.role}</span>
+              <span
+                className={`access ${member.active ? "active" : "inactive"}`}
+              >
+                {member.active ? "Active" : "Inactive"}
+              </span>
+              {canManage(user.role) && (
+                <div className="row-actions">
+                  <Button variant="ghost" onClick={() => setResetFor(member)}>
+                    Reset password
+                  </Button>
+                  {member.id !== user.id && (
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        toggle.mutate({
+                          userId: member.id,
+                          active: !member.active,
+                        })
+                      }
+                    >
+                      {member.active ? "Deactivate" : "Activate"}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+      {show && (
+        <StaffModal
+          onClose={() => setShow(false)}
+          pending={create.isPending}
+          onSubmit={input => create.mutate(input)}
+        />
+      )}
+      {resetFor && (
+        <Modal
+          title={`Reset password · ${resetFor.name}`}
+          onClose={() => setResetFor(null)}
+        >
+          <Field label="New password">
+            <input
+              type="password"
+              minLength={8}
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="At least 8 characters"
+            />
+          </Field>
+          <div className="modal-actions">
+            <Button variant="secondary" onClick={() => setResetFor(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={newPassword.length < 8}
+              onClick={() =>
+                reset.mutate({ userId: resetFor.id, password: newPassword })
+              }
+            >
+              Save password
+            </Button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+function StaffModal({
+  onClose,
+  onSubmit,
+  pending,
+}: {
+  onClose: () => void;
+  onSubmit: (input: any) => void;
+  pending: boolean;
+}) {
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    role: "Driver",
+    password: "",
+  });
+  return (
+    <Modal title="Add staff account" onClose={onClose}>
+      <form
+        onSubmit={e => {
+          e.preventDefault();
+          onSubmit(form);
+        }}
+      >
+        <div className="form-grid">
+          <Field label="Full name">
+            <input
+              required
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+            />
+          </Field>
+          <Field label="Email">
+            <input
+              required
+              type="email"
+              value={form.email}
+              onChange={e => setForm({ ...form, email: e.target.value })}
+            />
+          </Field>
+          <Field label="Phone">
+            <input
+              value={form.phone}
+              onChange={e => setForm({ ...form, phone: e.target.value })}
+            />
+          </Field>
+          <Field label="Role">
+            <select
+              value={form.role}
+              onChange={e => setForm({ ...form, role: e.target.value })}
+            >
+              {roles
+                .filter(role => role !== "Owner")
+                .map(role => (
+                  <option key={role}>{role}</option>
+                ))}
+            </select>
+          </Field>
+          <Field
+            label="Temporary password"
+            hint="The staff member can use this immediately"
+          >
+            <input
+              required
+              minLength={8}
+              type="password"
+              value={form.password}
+              onChange={e => setForm({ ...form, password: e.target.value })}
+            />
+          </Field>
+        </div>
+        <div className="modal-actions">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending}>
+            {pending ? "Adding…" : "Add staff"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function PodView({ deliveries, user }: { deliveries: Delivery[]; user: User }) {
+  const verify = trpc.deliveries.verifyProof.useMutation({
+    onSuccess: () => toast.success("POD review saved"),
+  });
+  const utils = trpc.useUtils();
+  useEffect(() => {
+    if (verify.isSuccess) void utils.deliveries.list.invalidate();
+  }, [verify.isSuccess, utils]);
+  const queue = deliveries.filter(d =>
+    ["Ready", "Verified"].includes(d.proofStatus)
+  );
+  return (
+    <>
+      <PageHeading
+        eyebrow="Evidence / verification"
+        title="Proof of delivery"
+        detail="Review carton handovers, confirm GPS evidence, and download a branded PDF record."
+      />
+      <div className="callout">
+        <FileText size={18} />
+        <span>
+          <b>Customer signature is not required.</b>
+          <small>
+            Carton quantities, optional photos, remarks, timestamp, rider and
+            GPS form the handover evidence.
+          </small>
+        </span>
+      </div>
+      <section className="panel">
+        <div className="table-meta">
+          <span>
+            <b>{queue.filter(d => d.proofStatus === "Ready").length}</b>{" "}
+            awaiting verification
+          </span>
+        </div>
+        {queue.length ? (
+          <div className="pod-list">
+            {queue.map(delivery => (
+              <div className="pod-row" key={delivery.id}>
+                <div className="pod-icon">
+                  <FileCheck2 size={19} />
+                </div>
+                <div className="pod-main">
+                  <b>
+                    {delivery.id} · {delivery.customer}
+                  </b>
+                  <small>
+                    {delivery.deliveredCartons}/{delivery.cartons} cartons ·{" "}
+                    {delivery.driver?.name ?? "Unassigned"} · submitted{" "}
+                    {formatDate(delivery.completedAt)}
+                  </small>
+                  {delivery.gps && (
+                    <small className="gps-line">
+                      <MapPin size={11} />
+                      GPS {delivery.gps.lat.toFixed(5)},{" "}
+                      {delivery.gps.lng.toFixed(5)} · ±
+                      {delivery.gps.accuracy ?? "—"}m
+                    </small>
+                  )}
+                </div>
+                <StatusPill
+                  status={
+                    delivery.proofStatus === "Ready"
+                      ? "Pending Verification"
+                      : "Delivered"
+                  }
+                />
+                <div className="row-actions">
+                  <Button
+                    variant="secondary"
+                    onClick={() => downloadPod(delivery.id)}
+                  >
+                    <Download size={14} />
+                    PDF
+                  </Button>
+                  {delivery.proofStatus === "Ready" && canVerify(user.role) && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        onClick={() =>
+                          verify.mutate({
+                            deliveryId: delivery.id,
+                            approved: false,
+                          })
+                        }
+                      >
+                        Flag
+                      </Button>
+                      <Button
+                        onClick={() =>
+                          verify.mutate({
+                            deliveryId: delivery.id,
+                            approved: true,
+                          })
+                        }
+                      >
+                        <Check size={14} />
+                        Verify
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="No POD evidence is waiting for review." />
+        )}
+      </section>
+    </>
+  );
+}
+
+function TrackerView({
+  deliveries,
+  user,
+}: {
+  deliveries: Delivery[];
+  user: User;
+}) {
+  const active = deliveries.filter(d =>
+    ["Out for Delivery", "Arrived", "Assigned"].includes(d.status)
+  );
+  const [selectedId, setSelectedId] = useState(
+    active[0]?.id ?? deliveries[0]?.id ?? ""
+  );
+  const selected = deliveries.find(d => d.id === selectedId);
+  return (
+    <>
+      <PageHeading
+        eyebrow="Operations / location"
+        title="Live rider tracker"
+        detail="Location is shared only after a rider grants browser permission. The latest point and trail are stored with the delivery."
+      />
+      <section className="tracker-layout">
+        <div className="panel tracker-map">
+          <div className="map-grid">
+            <div className="map-copy">
+              <MapPin size={28} />
+              <b>{selected?.gps ? "Latest GPS received" : "Waiting for GPS"}</b>
+              <span>
+                {selected?.gps
+                  ? `${selected.gps.lat.toFixed(6)}, ${selected.gps.lng.toFixed(6)}`
+                  : "Start tracking from the rider screen."}
+              </span>
+              {selected?.gps && (
+                <small>
+                  Accuracy ±{selected.gps.accuracy ?? "—"}m ·{" "}
+                  {formatDate(selected.gps.recordedAt)}
+                </small>
+              )}{" "}
+            </div>
+            {selected?.gps && (
+              <a
+                className="map-link"
+                target="_blank"
+                rel="noreferrer"
+                href={`https://www.openstreetmap.org/?mlat=${selected.gps.lat}&mlon=${selected.gps.lng}#map=16/${selected.gps.lat}/${selected.gps.lng}`}
+              >
+                <Link2 size={14} />
+                Open map
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="panel tracker-list">
+          <PanelTitle
+            eyebrow="Active assignments"
+            title={`${active.length} on route`}
+          />
+          <select
+            className="wide-select"
+            value={selectedId}
+            onChange={e => setSelectedId(e.target.value)}
+          >
+            <option value="">Select delivery</option>
+            {(active.length ? active : deliveries).map(d => (
+              <option key={d.id} value={d.id}>
+                {d.id} · {d.driver?.name ?? "Unassigned"}
+              </option>
+            ))}
+          </select>
+          {selected ? (
+            <div className="tracker-detail">
+              <StatusPill status={selected.status} />
+              <h3>{selected.customer}</h3>
+              <p>{selected.address}</p>
+              <div>
+                <span>Rider</span>
+                <b>{selected.driver?.name ?? "Unassigned"}</b>
+              </div>
+              <div>
+                <span>Trail points</span>
+                <b>{selected.gpsTrailCount}</b>
+              </div>
+              <div>
+                <span>Last update</span>
+                <b>{formatDate(selected.updatedAt)}</b>
+              </div>
+            </div>
+          ) : (
+            <EmptyState text="No delivery selected." />
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function DriverView({
+  deliveries,
+  lang,
+  user,
+}: {
+  deliveries: Delivery[];
+  lang: Lang;
+  user: User;
+}) {
+  const t = ui[lang];
+  const active = deliveries.find(d =>
+    ["Out for Delivery", "Arrived", "Assigned", "Scheduled"].includes(d.status)
+  );
+  const [tracking, setTracking] = useState(false);
+  const [gps, setGps] = useState<Delivery["gps"]>(active?.gps ?? null);
+  const [delivered, setDelivered] = useState(
+    active?.deliveredCartons?.toString() ?? ""
+  );
   const [rejected, setRejected] = useState("0");
-  const [note, setNote] = useState("");
-  const [photoAdded, setPhotoAdded] = useState(false);
-  const [gpsEnabled, setGpsEnabled] = useState(false);
-  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
-  const [completed, setCompleted] = useState(false);
-  const mine = deliveries.filter(d => d.driver === "Bilal Ahmed");
-  const active = mine.find(d => d.status === "Out for Delivery" || d.status === "Arrived") ?? mine[0];
-  const urdu = language === "UR";
-  const requestGps = () => navigator.geolocation?.getCurrentPosition(position => { setGpsEnabled(true); setGpsAccuracy(Math.round(position.coords.accuracy)); }, () => { setGpsEnabled(false); setGpsAccuracy(null); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-  return <div className={`driver-mobile-shell ${urdu ? "rtl" : ""}`}>
-    <div className="driver-mobile-top"><BrandMark /><button className="language-toggle" onClick={() => setLanguage(language === "EN" ? "UR" : "EN")}>{language === "EN" ? "اردو" : "EN"}</button></div>
-    <div className="driver-greeting"><div className="eyebrow">{urdu ? "آج کی ڈیلیوری" : "TODAY'S DELIVERY"}</div><h1>{urdu ? "السلام علیکم، بلال" : "Hello, Bilal"}</h1><p>{urdu ? "صرف چند چیزیں مکمل کریں" : "Complete the handover in a few taps."}</p></div>
-    {completed ? <div className="driver-pod-confirmation"><div className="confirmation-icon"><Check size={22} /></div><div className="eyebrow">{urdu ? "کامیاب" : "DELIVERY COMPLETE"}</div><h2>{urdu ? "POD تیار ہے" : "POD is ready"}</h2><p>{urdu ? "کارٹن ہینڈ اوور ریکارڈ تیار ہو گیا ہے" : "The carton handover PDF was created automatically."}</p><button className="driver-primary-button" onClick={() => setCompleted(false)}>{urdu ? "اگلی ڈیلیوری" : "Next delivery"}<ChevronRight size={17} /></button></div> : <>
-      <div className="driver-active-card"><div className="active-card-top"><span className="live-label"><span className="live-dot" />{urdu ? "فعال ڈیلیوری" : "ACTIVE DELIVERY"}</span><span className="mono">{active?.id.slice(-4)}</span></div><h2>{active?.customer ?? "Atlas Foods (Pvt.) Ltd."}</h2><p><MapPin size={15} />{active?.destination ?? "Korangi Industrial Area"}</p><div className="driver-card-meta"><span><FileText size={14} />{active?.challan ?? "CH-260151"}</span><span><PackageCheck size={14} />{active?.cartons ?? 350} cartons sent</span></div></div>
-      <div className="driver-proof-card"><div className="proof-card-heading"><div><div className="eyebrow">{urdu ? "کارٹن ہینڈ اوور" : "CARTON HANDOVER"}</div><h2>{urdu ? "کیا ڈیلیور ہوا؟" : "What was delivered?"}</h2></div><span className="step-chip">1 minute</span></div><div className="driver-input-grid"><label><span>{urdu ? "ڈیلیورڈ کارٹن" : "Delivered cartons"}</span><input className="driver-number-input" inputMode="numeric" value={delivered} onChange={e => setDelivered(e.target.value)} /></label><label><span>{urdu ? "خراب / واپس" : "Rejected / damaged"}</span><input className="driver-number-input" inputMode="numeric" value={rejected} onChange={e => setRejected(e.target.value)} /></label></div><label className="driver-note-label"><span>{urdu ? "نوٹ (اختیاری)" : "Short note (optional)"}</span><input className="driver-note-input" placeholder={urdu ? "مثلاً 2 کارٹن واپس" : "e.g. 2 cartons returned"} value={note} onChange={e => setNote(e.target.value)} /></label><div className="driver-proof-actions"><button className={`driver-photo-button ${photoAdded ? "added" : ""}`} onClick={() => setPhotoAdded(true)}><Camera size={19} /><span>{photoAdded ? (urdu ? "تصویر شامل" : "Photo added") : (urdu ? "تصویر لیں" : "Take photo")}<small>{photoAdded ? "1 photo" : "Optional proof"}</small></span><ChevronRight size={16} /></button><button className={`driver-gps-button ${gpsEnabled ? "enabled" : ""}`} onClick={requestGps}><MapPin size={17} /><span>{gpsEnabled ? (urdu ? "GPS محفوظ" : "GPS saved") : (urdu ? "GPS شامل کریں" : "Add GPS location")}<small>{gpsEnabled ? `${gpsAccuracy ?? ""}m accuracy` : "High accuracy · Optional"}</small></span></button></div><button className="driver-complete-button" onClick={() => setCompleted(true)}><Check size={18} />{urdu ? "ڈیلیوری مکمل کریں" : "Complete delivery"}</button><p className="driver-no-signature">{urdu ? "کسٹمر کے دستخط کی ضرورت نہیں" : "No customer signature required."}</p></div>
-    </>}
-    <div className="driver-section-title"><h3>{urdu ? "اگلی ڈیلیوری" : "Next delivery"}</h3><button>{urdu ? "سب دیکھیں" : "View all"}</button></div><div className="driver-list">{mine.slice(1, 3).map(d => <div className="driver-list-item" key={d.id}><span className="route-number">02</span><span><strong>{d.customer}</strong><small><MapPin size={11} />{d.destination}</small></span><span className="driver-list-time">{d.scheduled.split(" · ")[1]}</span><ChevronRight size={16} /></div>)}</div><div className="driver-bottom-nav"><button className="active"><LayoutDashboard size={18} /><span>{urdu ? "ہوم" : "Home"}</span></button><button><CalendarDays size={18} /><span>{urdu ? "روٹ" : "Route"}</span></button><button><FileCheck2 size={18} /><span>{urdu ? "تاریخ" : "History"}</span></button><button><UserRound size={18} /><span>{urdu ? "پروفائل" : "Profile"}</span></button></div>
-  </div>;
-}
-
-function SimpleModule({ view, onNavigate }: { view: ViewKey; onNavigate: (view: ViewKey) => void }) {
-  const configs: Record<string, { kicker: string; title: string; detail: string; icon: typeof Activity; rows: string[] }> = {
-    schedule: { kicker: "Operations / planning", title: "Schedule & routes", detail: "Plan the factory departure board, assign vehicles and keep unassigned work visible.", icon: CalendarDays, rows: ["Route 01 · Karachi West", "Route 02 · Clifton / DHA", "Route 03 · North District", "Route 04 · Industrial Loop"] },
-    pod: { kicker: "Evidence / verification queue", title: "Proof of delivery", detail: "Review carton handover records, photos and delivery evidence before records become verified.", icon: FileCheck2, rows: ["6 carton handovers awaiting supervisor verification", "2 POD PDFs generated today", "1 correction requested by dispatch", "Customer signatures are not required"] },
-    drivers: { kicker: "Network / field team", title: "Driver management", detail: "Performance with context: volume, partials, failed attempts, timing and route conditions.", icon: UserRound, rows: ["Bilal Ahmed · 18 assigned · 89% on time", "Ahsan Raza · 15 assigned · 93% on time", "Usman Khan · 16 assigned · 81% on time", "Imran Shah · 12 assigned · 86% on time"] },
-    vehicles: { kicker: "Network / fleet", title: "Vehicle management", detail: "Track readiness, assignment and maintenance without allowing unavailable vehicles onto a route.", icon: Truck, rows: ["LEA-8421 · On Delivery · Bilal Ahmed", "KHI-1187 · Assigned · Ahsan Raza", "LEA-7710 · Available · Usman Khan", "LEA-5192 · Maintenance due · 02 Nov 2026"] },
-    customers: { kicker: "Network / customer directory", title: "Customers", detail: "Customer history and destination context for faster, cleaner delivery creation.", icon: UsersRound, rows: ["Atlas Foods (Pvt.) Ltd. · 42 deliveries", "Nexus Retail Group · 31 deliveries", "Green Basket Trading · 24 deliveries", "PakBuild Materials · 18 deliveries"] },
-    reports: { kicker: "Control / reporting", title: "Reports & analytics", detail: "Export operational truth by date, customer, driver, vehicle, status and branch.", icon: Activity, rows: ["Monthly company report · October 2026", "Driver performance report · This month", "Failed delivery report · Last 30 days", "Customer delivery history · Select customer"] },
-    users: { kicker: "Control / access", title: "Users & permissions", detail: "Owner-managed access with roles, invitations, custom permissions and audit-safe changes.", icon: ShieldCheck, rows: ["Ahsan · Owner · Full access", "4 drivers · Driver role · Own assignments only", "2 dispatch users · Dispatch permissions", "Optional two-factor authentication · Ready to enable"] },
-    notifications: { kicker: "Control / internal updates", title: "Notifications", detail: "Role-aware internal events across assignments, status changes and submitted proof.", icon: Bell, rows: ["POD submitted by Bilal Ahmed", "Delivery assigned to Ahsan Raza", "Partial delivery requires follow-up", "Vehicle maintenance reminder"] },
-    audit: { kicker: "Control / traceability", title: "Audit log", detail: "An immutable operational history for the Owner and authorised administrators.", icon: Archive, rows: ["Delivery assignment changed · NAZ-POD-2026-0151", "POD submitted · NAZ-POD-2026-0149", "Status changed · Arrived → Pending Verification", "Demo mode enabled · Owner settings"] },
-    settings: { kicker: "Owner control / configuration", title: "Owner settings", detail: "Keep company identity and operating rules editable without inventing missing information.", icon: Settings2, rows: ["Company profile · Nazmi Packaging Company (Pvt.) Ltd.", "Timezone · Asia/Karachi · PKR · DD/MM/YYYY", "Duplicate checks · Challan + order/reference", "Evidence retention · Configurable · No silent deletion"] },
+  const [notes, setNotes] = useState("");
+  const [photos, setPhotos] = useState<string[]>([]);
+  const watchRef = useRef<number | null>(null);
+  const location = trpc.deliveries.updateLocation.useMutation();
+  const statusUpdate = trpc.deliveries.updateStatus.useMutation({
+    onSuccess: () =>
+      toast.success(lang === "UR" ? "ڈیلیوری شروع ہو گئی" : "Delivery started"),
+  });
+  const proof = trpc.deliveries.submitProof.useMutation({
+    onSuccess: () =>
+      toast.success(
+        lang === "UR"
+          ? "POD محفوظ ہو گیا"
+          : "POD saved and sent for verification"
+      ),
+  });
+  const utils = trpc.useUtils();
+  useEffect(
+    () => () => {
+      if (watchRef.current !== null)
+        navigator.geolocation?.clearWatch(watchRef.current);
+    },
+    []
+  );
+  const toggleTracking = () => {
+    if (!active || !navigator.geolocation)
+      return toast.error("This browser does not provide GPS.");
+    if (tracking) {
+      if (watchRef.current !== null)
+        navigator.geolocation.clearWatch(watchRef.current);
+      watchRef.current = null;
+      setTracking(false);
+      return;
+    }
+    setTracking(true);
+    watchRef.current = navigator.geolocation.watchPosition(
+      position => {
+        const point = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: Math.round(position.coords.accuracy),
+          speed: position.coords.speed,
+          heading: position.coords.heading,
+          recordedAt: new Date().toISOString(),
+        };
+        setGps(point);
+        location.mutate({ deliveryId: active.id, ...point });
+      },
+      () => {
+        setTracking(false);
+        toast.error("GPS permission was denied or unavailable.");
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+    );
   };
-  const config = configs[view] ?? configs.settings;
-  const Icon = config.icon;
-  return <><SectionHeader kicker={config.kicker} title={config.title} detail={config.detail} action={<button className="secondary-button"><Download size={15} />Export view</button>} /><div className="module-hero"><div className="module-hero-icon"><Icon size={23} /></div><div><div className="eyebrow">NAZMI POD / DEMO WORKSPACE</div><h2>Operational records stay connected.</h2><p>This workspace is shaped for the real workflow. Connect managed data and storage to move from demonstration records to production evidence.</p></div><button className="primary-button" onClick={() => onNavigate("settings")}>Open configuration <ChevronRight size={16} /></button></div><div className="module-grid">{config.rows.map((row, index) => <div className="module-row" key={row}><span className="module-index">0{index + 1}</span><span>{row}</span><ChevronRight size={16} /></div>)}</div><div className="panel empty-panel"><Globe2 size={22} /><h3>Ready for the next connected step</h3><p>When this module is connected to managed records, these rows become drill-down tables, forms and exports with server-side permission checks.</p><button className="text-button" onClick={() => onNavigate("overview")}>Return to Owner dashboard <ChevronRight size={15} /></button></div></>;
+  const submit = () => {
+    if (!active) return;
+    proof.mutate({
+      deliveryId: active.id,
+      deliveredCartons: Number(delivered),
+      rejectedCartons: Number(rejected),
+      notes,
+      photos,
+    });
+    void utils.deliveries.list.invalidate();
+    void utils.dashboard.summary.invalidate();
+  };
+  return (
+    <div className={`driver-screen ${lang === "UR" ? "rtl" : ""}`}>
+      <div className="driver-head">
+        <div>
+          <span className="eyebrow">
+            {lang === "UR" ? "رائیڈر ورک اسپیس" : "RIDER WORKSPACE"}
+          </span>
+          <h1>
+            {lang === "UR"
+              ? `السلام علیکم، ${user.name}`
+              : `Hello, ${user.name}.`}
+          </h1>
+          <p>
+            {lang === "UR"
+              ? "چند آسان مراحل میں ہینڈ اوور مکمل کریں۔"
+              : "Complete the handover in a few clear steps."}
+          </p>
+        </div>
+        <div className="driver-head-actions">
+          {active && ["Scheduled", "Assigned"].includes(active.status) && (
+            <Button
+              onClick={() =>
+                statusUpdate.mutate({
+                  deliveryId: active.id,
+                  status: "Out for Delivery",
+                })
+              }
+            >
+              <Truck size={16} />
+              {lang === "UR" ? "ڈیلیوری شروع کریں" : "Start delivery"}
+            </Button>
+          )}
+          <Button
+            variant={tracking ? "danger" : "secondary"}
+            onClick={toggleTracking}
+          >
+            <MapPin size={16} />
+            {tracking
+              ? lang === "UR"
+                ? "GPS بند کریں"
+                : "Stop GPS"
+              : lang === "UR"
+                ? "GPS شروع کریں"
+                : "Start GPS"}
+          </Button>
+        </div>
+      </div>
+      {active ? (
+        <>
+          <div className="driver-active">
+            <div>
+              <span className="live-label">
+                <i />
+                {lang === "UR" ? "فعال ڈیلیوری" : "ACTIVE DELIVERY"}
+              </span>
+              <h2>{active.customer}</h2>
+              <p>
+                <MapPin size={15} />
+                {active.address}
+              </p>
+            </div>
+            <span className="mono">{active.id}</span>
+          </div>
+          <div className="driver-grid">
+            <section className="panel proof-form">
+              <PanelTitle
+                eyebrow={lang === "UR" ? "کارٹن ہینڈ اوور" : "CARTON HANDOVER"}
+                title={
+                  lang === "UR" ? "کیا ڈیلیور ہوا؟" : "What was delivered?"
+                }
+              />
+              <div className="quantity-grid">
+                <Field
+                  label={lang === "UR" ? "ڈیلیورڈ کارٹن" : "Delivered cartons"}
+                >
+                  <input
+                    type="number"
+                    min="0"
+                    max={active.cartons}
+                    value={delivered}
+                    onChange={e => setDelivered(e.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={lang === "UR" ? "خراب / واپس" : "Rejected / damaged"}
+                >
+                  <input
+                    type="number"
+                    min="0"
+                    max={active.cartons}
+                    value={rejected}
+                    onChange={e => setRejected(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <Field
+                label={
+                  lang === "UR"
+                    ? "مختصر نوٹ (اختیاری)"
+                    : "Short note (optional)"
+                }
+              >
+                <textarea
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder={
+                    lang === "UR"
+                      ? "مثلاً 2 کارٹن واپس"
+                      : "e.g. 2 cartons returned"
+                  }
+                />
+              </Field>
+              <Field
+                label={
+                  lang === "UR" ? "تصاویر (اختیاری)" : "Proof photos (optional)"
+                }
+              >
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  onChange={e =>
+                    setPhotos(
+                      Array.from(e.target.files ?? []).map(file => file.name)
+                    )
+                  }
+                />
+                <small>
+                  {photos.length
+                    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} selected`
+                    : "Use the camera on your phone."}
+                </small>
+              </Field>
+              <div className="gps-card">
+                <MapPin size={18} />
+                <span>
+                  <b>
+                    {gps
+                      ? lang === "UR"
+                        ? "GPS محفوظ"
+                        : "GPS captured"
+                      : lang === "UR"
+                        ? "GPS شامل نہیں"
+                        : "GPS not captured"}
+                  </b>
+                  <small>
+                    {gps
+                      ? `${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} · ±${gps.accuracy ?? "—"}m`
+                      : "Optional, high-accuracy location"}
+                  </small>
+                </span>
+                <Button variant="ghost" onClick={toggleTracking}>
+                  {tracking ? "Tracking…" : "Enable"}
+                </Button>
+              </div>
+              <Button onClick={submit} disabled={proof.isPending || !delivered}>
+                <Check size={17} />
+                {proof.isPending
+                  ? lang === "UR"
+                    ? "محفوظ ہو رہا ہے…"
+                    : "Saving…"
+                  : lang === "UR"
+                    ? "ڈیلیوری ختم کریں اور POD جمع کریں"
+                    : "End delivery & submit POD"}
+              </Button>
+              <p className="signature-note">
+                {lang === "UR"
+                  ? "کسٹمر کے دستخط کی ضرورت نہیں"
+                  : "No customer signature is required."}
+              </p>
+            </section>
+            <section className="panel driver-next">
+              <PanelTitle
+                eyebrow={lang === "UR" ? "اگلا کام" : "NEXT UP"}
+                title={lang === "UR" ? "آپ کا روٹ" : "Your route"}
+              />
+              {deliveries
+                .filter(d => d.id !== active.id)
+                .slice(0, 5)
+                .map(item => (
+                  <div className="next-row" key={item.id}>
+                    <span className="route-number">{item.id.slice(-2)}</span>
+                    <div>
+                      <b>{item.customer}</b>
+                      <small>{item.address}</small>
+                    </div>
+                    <StatusPill status={item.status} />
+                  </div>
+                ))}
+            </section>
+          </div>
+        </>
+      ) : (
+        <EmptyState
+          text={
+            lang === "UR"
+              ? "آپ کو ابھی کوئی ڈیلیوری تفویض نہیں ہوئی۔"
+              : "No delivery is assigned to you yet."
+          }
+        />
+      )}
+    </div>
+  );
 }
 
-function DeliveryDrawer({ delivery, onClose, onStatus }: { delivery: Delivery; onClose: () => void; onStatus: (status: DeliveryStatus) => void }) {
-  return <div className="drawer-backdrop" onClick={onClose}><aside className="detail-drawer" onClick={e => e.stopPropagation()}><div className="drawer-head"><div><div className="eyebrow">Delivery detail</div><h2 className="mono">{delivery.id}</h2></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div><div className="drawer-status"><StatusBadge status={delivery.status} /><span className="demo-text">DEMO RECORD</span></div><div className="drawer-block"><span className="eyebrow">Customer & destination</span><h3>{delivery.customer}</h3><p><MapPin size={14} />{delivery.destination}</p><p><FileText size={14} />Challan {delivery.challan}</p></div><div className="drawer-block"><span className="eyebrow">Assignment</span><div className="drawer-stat"><span>Driver</span><strong>{delivery.driver}</strong></div><div className="drawer-stat"><span>Vehicle</span><strong>{delivery.vehicle}</strong></div><div className="drawer-stat"><span>Route</span><strong>{delivery.route}</strong></div></div><div className="drawer-block"><span className="eyebrow">Load & evidence</span><div className="drawer-stat"><span>Cartons delivered</span><strong>{delivery.delivered} / {delivery.cartons}</strong></div><div className="evidence-grid"><span className={delivery.proof === "Ready" ? "ready" : "pending"}><Camera size={14} />Photos</span><span className={delivery.proof === "Ready" ? "ready" : "pending"}><FileCheck2 size={14} />POD PDF</span></div></div><div className="drawer-block"><span className="eyebrow">Workflow action</span><div className="drawer-actions"><button className="secondary-button" onClick={() => onStatus("Out for Delivery")}>Start / resume</button><button className="primary-button" onClick={() => onStatus("Pending Verification")}>Send for verification <Send size={15} /></button></div></div><div className="drawer-timeline"><div className="timeline-item done"><i /><span><strong>Delivery created</strong><small>30 Oct · 08:12 · Dispatch</small></span></div><div className="timeline-item done"><i /><span><strong>Assigned to {delivery.driver}</strong><small>30 Oct · 08:36 · Dispatch Manager</small></span></div><div className="timeline-item current"><i /><span><strong>{delivery.status}</strong><small>Waiting for next operational action</small></span></div></div></aside></div>;
+function SettingsView() {
+  const query = trpc.settings.get.useQuery();
+  const update = trpc.settings.update.useMutation({
+    onSuccess: () => toast.success("Settings saved"),
+  });
+  const [form, setForm] = useState<any>(null);
+  useEffect(() => {
+    if (query.data && !form) setForm(query.data);
+  }, [query.data, form]);
+  if (query.isLoading || !form) return <Loading />;
+  return (
+    <>
+      <PageHeading
+        eyebrow="Owner control / configuration"
+        title="Company settings"
+        detail="Keep the company identity and operating context editable without inventing missing contact details."
+      />
+      <section className="panel settings-panel">
+        <div className="form-grid">
+          {(
+            [
+              "companyName",
+              "address",
+              "phone",
+              "email",
+              "website",
+              "timezone",
+              "currency",
+            ] as const
+          ).map(key => (
+            <Field
+              key={key}
+              label={
+                key === "companyName"
+                  ? "Company name"
+                  : key[0].toUpperCase() + key.slice(1)
+              }
+            >
+              <input
+                value={form[key]}
+                onChange={e => setForm({ ...form, [key]: e.target.value })}
+              />
+            </Field>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <Button
+            onClick={() => update.mutate(form)}
+            disabled={update.isPending}
+          >
+            {update.isPending ? "Saving…" : "Save changes"}
+          </Button>
+        </div>
+      </section>
+    </>
+  );
+}
+function AuditView() {
+  const query = trpc.audit.list.useQuery();
+  return (
+    <>
+      <PageHeading
+        eyebrow="Control / traceability"
+        title="Audit log"
+        detail="Login, delivery creation, assignment, status, proof, verification and permission changes are recorded here."
+      />
+      <section className="panel">
+        {query.data?.length ? (
+          <div className="audit-list">
+            {query.data.map(item => (
+              <div className="audit-row" key={item.id}>
+                <span className="audit-icon">
+                  <Activity size={15} />
+                </span>
+                <div>
+                  <b>{item.action.replaceAll("_", " ")}</b>
+                  <small>{item.details}</small>
+                </div>
+                <span>
+                  <b>{item.actorName}</b>
+                  <small>{formatDate(item.createdAt)}</small>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text="No audit events yet." />
+        )}
+      </section>
+    </>
+  );
+}
+function Loading() {
+  return (
+    <div className="loading">
+      <RefreshCw className="spin" size={20} />
+      Loading workspace…
+    </div>
+  );
+}
+function Modal({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <span className="eyebrow">NAZMI POD</span>
+            <h2>{title}</h2>
+          </div>
+          <button className="icon-button" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 export default function Home() {
-  const [activeView, setActiveView] = useState<ViewKey>("overview");
-  const [deliveries, setDeliveries] = useState<Delivery[]>(initialDeliveries);
-  const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [role, setRole] = useState("OWNER");
-
-  const navigate = (view: ViewKey) => { setActiveView(view); setMobileNavOpen(false); window.history.replaceState(null, "", view === "overview" ? "/" : `/${view}`); };
-  const updateSelectedStatus = (status: DeliveryStatus) => {
-    if (!selectedDelivery) return;
-    setDeliveries(current => current.map(d => d.id === selectedDelivery.id ? { ...d, status, proof: status === "Pending Verification" ? "Ready" : d.proof } : d));
-    setSelectedDelivery(current => current ? { ...current, status, proof: status === "Pending Verification" ? "Ready" : current.proof } : current);
+  const status = trpc.auth.status.useQuery();
+  const me = trpc.auth.me.useQuery();
+  const utils = trpc.useUtils();
+  const [view, setView] = useState<ViewKey>(() =>
+    window.location.pathname === "/driver"
+      ? "driver"
+      : (window.location.pathname.slice(1) as ViewKey) || "overview"
+  );
+  const [lang, setLang] = useState<Lang>(
+    () => (localStorage.getItem("nazmi-lang") as Lang) || "EN"
+  );
+  const logout = trpc.auth.logout.useMutation({
+    onSuccess: () => {
+      void utils.auth.me.invalidate();
+      toast.success("Signed out");
+    },
+  });
+  const user = me.data as User | null | undefined;
+  const navigate = (next: ViewKey) => {
+    setView(next);
+    window.history.replaceState(
+      null,
+      "",
+      next === "overview" ? "/" : `/${next}`
+    );
   };
-
-  const renderView = () => {
-    if (activeView === "overview") return <OwnerOverview deliveries={deliveries} onNavigate={navigate} />;
-    if (activeView === "deliveries") return <DeliveriesView deliveries={deliveries} setDeliveries={setDeliveries} onSelect={setSelectedDelivery} />;
-    if (activeView === "driver-mobile") return <DriverMobileView deliveries={deliveries} />;
-    return <SimpleModule view={activeView} onNavigate={navigate} />;
-  };
-
-  return <div className="app-shell">
-    <aside className={`side-rail ${mobileNavOpen ? "open" : ""}`}>
-      <div className="rail-top"><BrandMark /><button className="rail-close icon-button" onClick={() => setMobileNavOpen(false)}><X size={18} /></button></div>
-      <div className="workspace-select"><span className="workspace-dot" /><span><strong>Nazmi Packaging</strong><small>Primary workspace</small></span><ChevronDown size={14} /></div>
-      <nav className="main-nav">{navSections.map(section => <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map(item => { const Icon = item.icon; return <button key={item.key} className={`nav-item ${activeView === item.key ? "active" : ""}`} onClick={() => navigate(item.key as ViewKey)}><Icon size={17} /><span>{item.label}</span>{item.count && <em>{item.count}</em>}</button>; })}</div>)}<div className="nav-section driver-entry"><span className="nav-label">Experience</span><button className={`nav-item ${activeView === "driver-mobile" ? "active" : ""}`} onClick={() => navigate("driver-mobile")}><Globe2 size={17} /><span>Driver mobile</span><span className="new-chip">Try</span></button></div></nav>
-      <div className="rail-footer"><div className="sync-card"><span className="sync-dot" /><div><strong>System healthy</strong><small>Demo workspace · synced</small></div></div><button className="user-mini"><span className="avatar avatar-emerald">AH</span><span><strong>Ahsan</strong><small>Owner</small></span><MoreHorizontal size={15} /></button></div>
-    </aside>
-    <main className="main-canvas"><header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" onClick={() => setMobileNavOpen(true)}><Menu size={19} /></button><button className="breadcrumb-button" onClick={() => navigate("overview")}><Command size={15} /><span>NAZMI POD</span><ChevronRight size={14} /><strong>{activeView === "overview" ? "Owner dashboard" : activeView.replace("-", " ")}</strong></button></div><div className="topbar-actions"><div className="role-switch"><span className="role-dot" /><select value={role} onChange={e => setRole(e.target.value)}><option>OWNER</option><option>MANAGEMENT</option><option>DISPATCH</option><option>SUPERVISOR</option><option>DRIVER</option></select><ChevronDown size={13} /></div><button className="icon-button notification-button" onClick={() => navigate("notifications")}><Bell size={17} /><span>4</span></button><button className="avatar avatar-emerald avatar-button" onClick={() => navigate("settings")}>AH</button></div></header><div className="content-wrap">{role === "DRIVER" && activeView === "overview" ? <DriverMobileView deliveries={deliveries} /> : renderView()}</div></main>
-    {selectedDelivery && <DeliveryDrawer delivery={selectedDelivery} onClose={() => setSelectedDelivery(null)} onStatus={updateSelectedStatus} />}
-  </div>;
+  if (status.isLoading || me.isLoading) return <Loading />;
+  if (!user)
+    return (
+      <AuthScreen
+        setupRequired={Boolean(status.data?.setupRequired)}
+        onComplete={() => void me.refetch()}
+      />
+    );
+  const t = ui[lang];
+  return (
+    <div className={`app-shell ${lang === "UR" ? "rtl" : ""}`}>
+      <aside className="sidebar">
+        <div className="sidebar-top">
+          <Brand />
+          <button className="mobile-close">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="workspace-chip">
+          <span className="live-dot" />
+          <span>
+            <b>Nazmi Packaging</b>
+            <small>Primary workspace</small>
+          </span>
+        </div>
+        <nav>
+          {user.role === "Driver" ? (
+            <NavButton
+              active={view === "driver"}
+              icon={<Truck />}
+              label={t.driver}
+              onClick={() => navigate("driver")}
+            />
+          ) : (
+            <>
+              <NavButton
+                active={view === "overview"}
+                icon={<LayoutDashboard />}
+                label={t.dashboard}
+                onClick={() => navigate("overview")}
+              />
+              <NavButton
+                active={view === "deliveries"}
+                icon={<PackageCheck />}
+                label={t.deliveries}
+                onClick={() => navigate("deliveries")}
+              />
+              <NavButton
+                active={view === "pod"}
+                icon={<FileCheck2 />}
+                label={t.pod}
+                onClick={() => navigate("pod")}
+              />
+              <NavButton
+                active={view === "tracker"}
+                icon={<MapPin />}
+                label={t.tracker}
+                onClick={() => navigate("tracker")}
+              />
+              <NavButton
+                active={view === "staff"}
+                icon={<UsersRound />}
+                label={t.staff}
+                onClick={() => navigate("staff")}
+              />
+              {["Owner", "Director"].includes(user.role) && (
+                <NavButton
+                  active={view === "settings"}
+                  icon={<Settings2 />}
+                  label={t.settings}
+                  onClick={() => navigate("settings")}
+                />
+              )}
+              <NavButton
+                active={view === "audit"}
+                icon={<ShieldCheck />}
+                label={t.audit}
+                onClick={() => navigate("audit")}
+              />
+            </>
+          )}
+        </nav>
+        <div className="sidebar-foot">
+          <div className="system-state">
+            <span className="live-dot" />
+            <span>
+              <b>System healthy</b>
+              <small>Secure server session</small>
+            </span>
+          </div>
+          <div className="user-card">
+            <Avatar name={user.name} />
+            <span>
+              <b>{user.name}</b>
+              <small>{user.role}</small>
+            </span>
+            <button onClick={() => logout.mutate()} title={t.signOut}>
+              <LogOut size={15} />
+            </button>
+          </div>
+        </div>
+      </aside>
+      <main className="main">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button className="mobile-menu">
+              <Menu size={19} />
+            </button>
+            <button
+              className="crumb"
+              onClick={() =>
+                navigate(user.role === "Driver" ? "driver" : "overview")
+              }
+            >
+              <Zap size={15} /> NAZMI POD <span>/</span>{" "}
+              <b>
+                {user.role === "Driver"
+                  ? t.driver
+                  : view === "overview"
+                    ? t.dashboard
+                    : (t[view as keyof typeof t] ?? view)}
+              </b>
+            </button>
+          </div>
+          <div className="top-actions">
+            <button
+              className="language-button"
+              onClick={() => {
+                const next = lang === "EN" ? "UR" : "EN";
+                setLang(next);
+                localStorage.setItem("nazmi-lang", next);
+              }}
+            >
+              {lang === "EN" ? "اردو" : "EN"}
+            </button>
+            <span className="role-chip">
+              <CircleUserRound size={14} />
+              {user.role}
+            </span>
+            <Avatar name={user.name} />
+          </div>
+        </header>
+        <div className="content">
+          {user.role === "Driver" || view === "driver" ? (
+            <DriverWorkspace lang={lang} user={user} />
+          ) : (
+            <WorkspaceView
+              view={view}
+              user={user}
+              navigate={navigate}
+              lang={lang}
+            />
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+function NavButton({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`nav-button ${active ? "active" : ""}`}
+      onClick={onClick}
+    >
+      {icon}
+      <span>{label}</span>
+      <ChevronDown className="nav-chevron" size={14} />
+    </button>
+  );
+}
+function DriverWorkspace({ lang, user }: { lang: Lang; user: User }) {
+  const query = trpc.deliveries.list.useQuery(undefined, {
+    refetchInterval: 15000,
+  });
+  if (query.isLoading) return <Loading />;
+  return (
+    <DriverView
+      deliveries={(query.data ?? []) as Delivery[]}
+      lang={lang}
+      user={user}
+    />
+  );
+}
+function WorkspaceView({
+  view,
+  user,
+  navigate,
+  lang,
+}: {
+  view: ViewKey;
+  user: User;
+  navigate: (view: ViewKey) => void;
+  lang: Lang;
+}) {
+  const deliveriesQuery = trpc.deliveries.list.useQuery(undefined, {
+    refetchInterval: 15000,
+  });
+  const staffQuery = trpc.staff.list.useQuery();
+  const summary = trpc.dashboard.summary.useQuery();
+  const deliveries = (deliveriesQuery.data ?? []) as Delivery[];
+  const staff = (staffQuery.data ?? []) as User[];
+  if (deliveriesQuery.isLoading || staffQuery.isLoading || summary.isLoading)
+    return <Loading />;
+  if (view === "overview")
+    return (
+      <Dashboard
+        summary={summary.data}
+        deliveries={deliveries}
+        user={user}
+        navigate={navigate}
+        lang={lang}
+      />
+    );
+  if (view === "deliveries")
+    return (
+      <DeliveriesView
+        deliveries={deliveries}
+        staff={staff}
+        user={user}
+        navigate={navigate}
+      />
+    );
+  if (view === "staff") return <StaffView staff={staff} user={user} />;
+  if (view === "pod") return <PodView deliveries={deliveries} user={user} />;
+  if (view === "tracker")
+    return <TrackerView deliveries={deliveries} user={user} />;
+  if (view === "settings") return <SettingsView />;
+  if (view === "audit") return <AuditView />;
+  return (
+    <Dashboard
+      summary={summary.data}
+      deliveries={deliveries}
+      user={user}
+      navigate={navigate}
+      lang={lang}
+    />
+  );
 }

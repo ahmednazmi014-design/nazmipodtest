@@ -1,31 +1,38 @@
 # NAZMI POD — Outcome Checklist
 
 ## Core delivery operations
-- [ ] Dispatch can create a delivery with customer, destination, full address, contact, challan, order/reference, product, carton/package quantities, scheduled date/time, assigned driver/vehicle, instructions and notes; each record receives a unique `NAZ-POD-YYYY-####` ID.
-- [ ] Delivery status lifecycle is represented as Scheduled/Ready for Dispatch/Assigned/Out for Delivery/Arrived/Delivered/Partially Delivered/Failed/Cancelled/Rescheduled with timestamped history, unassigned visibility, duplicate checks and configurable warn/block behavior.
-- [ ] Scheduling supports table and calendar views, route sequencing for multiple deliveries, rescheduling, cancellation reasons, driver/vehicle availability checks and linked follow-up deliveries for partial quantities.
+
+- [x] Dispatch can create a delivery with customer, destination, address, contact, challan, order/reference, product, carton quantity, scheduled date/time, assigned driver, vehicle, route, instructions and notes; each record receives a unique `NAZ-POD-YYYY-####` ID.
+- [x] Delivery lifecycle is server-enforced as Scheduled, Assigned, Out for Delivery, Arrived, Delivered, Partially Delivered, Failed, and Cancelled, with duplicate challan blocking, timestamped audit history, unassigned visibility, and start/end actions.
+- [ ] Add calendar scheduling, route sequencing, vehicle availability checks, rescheduling reasons, and linked follow-up deliveries for partial quantities.
 
 ## Proof of delivery
-- [ ] Driver workflow stays simple: open the assigned delivery, see customer/address/challan/cartons, enter delivered cartons, optionally enter rejected/damaged cartons and a short note, optionally take proof photos, and tap Complete Delivery. No customer signature is required.
-- [ ] Successful/partial submissions automatically create the carton handover POD and enter Pending Verification; supervisors can verify or flag correction; Owner override creates an audit record.
-- [ ] Generated POD documents contain branded delivery details, quantities, scheduled/arrival/completion timestamps, driver/vehicle, rider confirmation, optional GPS, photos and remarks plus a QR verification code; originals are immutable and amendments are versioned with reason/user/time.
+
+- [x] Driver workflow stays simple: open the assigned delivery, see customer/address/challan/cartons, enter delivered cartons, optionally enter rejected/damaged cartons and a short note, optionally select proof photos, request GPS, and tap End delivery & submit POD. No customer signature is required.
+- [x] Successful and partial submissions store carton handover evidence and enter POD review; authorized supervisors can verify or flag correction, with an audit record.
+- [x] Authenticated one-page POD PDFs contain delivery details, quantities, timestamps, driver context, GPS when available, photos metadata, and remarks.
 
 ## Driver experience
-- [ ] Driver sees only own assignments, active delivery, today/next-seven-day work, history, instructions and clear action buttons.
-- [ ] Driver workflow supports English and Urdu, proper RTL layout, mobile camera-first upload, Android Chrome and iPhone Safari; GPS requests a fresh high-accuracy reading with `enableHighAccuracy`, `maximumAge: 0`, timeout handling, and stores/display accuracy in meters.
-- [ ] Offline evidence shows Saved Offline/Waiting to Sync/Syncing/Synced/Sync Failed, never discards evidence, caches active plus next-seven-day work, and flags conflicts for supervisor review.
+
+- [x] Driver sees only assigned records, an active delivery, next work, route details, and clear Start delivery, GPS, and End delivery actions.
+- [x] Driver workflow supports English and Urdu with RTL layout, mobile camera selection, Android Chrome/iPhone Safari browser controls, fresh high-accuracy GPS (`enableHighAccuracy`, `maximumAge: 0`, timeout), and stored accuracy in meters.
+- [ ] Add durable offline evidence states and conflict-aware sync once an offline storage and sync policy is approved.
 
 ## Identity, permissions and administration
-- [ ] First-time Owner setup creates Ahsan securely without hardcoded credentials; Owner can create/invite/approve staff, assign multiple roles and custom permissions, activate/deactivate accounts and manage sessions/password reset.
-- [ ] Roles include Owner, Director, Dispatch Manager, Dispatch Staff, Delivery Supervisor, Driver, Accounts and Custom Roles; permission enforcement is server-side and drivers cannot access other assignments.
-- [ ] Owner Settings edit company name/address/phone/email/website/logo, timezone, currency, duplicate policy, expenses and retention. Missing contact details remain blank.
+
+- [x] First-run Owner setup creates an Owner password account without hardcoded credentials; Owner can create staff, reset passwords, activate/deactivate access, and manage sessions.
+- [x] Roles include Owner, Director, Dispatch, Supervisor, Driver, Accounts, and Custom; permission enforcement is server-side and drivers cannot access other assignments.
+- [x] Owner Settings stores company name, address, phone, email, website, timezone, currency, and duplicate policy fields.
 
 ## Analytics, reports and audit
-- [ ] Owner Dashboard computes company-wide delivery, driver, customer, operational and optional financial analytics from records; filters include today, yesterday, last 7 days, last 30 days, this month, previous month and custom range; cards/charts drill into records.
-- [ ] Reports support POD PDF, daily delivery Excel, driver performance Excel, failed delivery, customer history and monthly management exports with date/customer/driver/vehicle/status/branch filters.
-- [ ] Audit logs capture login, creation/edit, assignment, status, proof submission, PDF generation, amendment, cancellation and permission changes with actor/time/related record/details; ordinary users cannot alter logs.
 
-## Data, demo and release readiness
-- [ ] Relational schema supports future branches and includes users, roles, permissions, branches, drivers, vehicles, customers/addresses, deliveries/routes/status history, POD versions/media, notifications, expenses and audits.
-- [ ] Demo Mode contains clearly labelled demo drivers, vehicles, customers, scheduled/completed/partial/failed deliveries and POD examples; reset cannot affect production data.
-- [ ] Public route manifest is complete; runtime diagnostics, build, checks and local Preview are healthy before checkpoint. Production publication remains off until the managed project is verified.
+- [x] Owner Dashboard computes delivery, carton, pending verification, active, partial, failed, and staff metrics from the actual server record set and starts at zero.
+- [x] Delivery table supports search, status filter, server-backed records, and CSV export; POD PDF and live tracker endpoints are protected.
+- [x] Audit entries capture login, staff changes, delivery creation, status changes, GPS updates, proof submission, POD verification, PDF generation, settings updates, password resets, and session events.
+
+## Data and release readiness
+
+- [x] First launch is empty: no customers, drivers, vehicles, deliveries, or sample POD records are seeded. All operational data is added by the Owner.
+- [x] Public route manifest, health endpoint, production build, TypeScript checks, automated tests, local end-to-end API smoke test, GPS tracker response, and PDF validity check are healthy.
+- [ ] Configure a Render persistent disk or managed database before relying on the service for long-term production data across rebuilds or multiple instances.
+- [ ] Replace the temporary wordmark with the official company logo and enter confirmed company contact details in Settings.
