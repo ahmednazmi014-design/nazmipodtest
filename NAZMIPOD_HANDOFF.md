@@ -8,11 +8,11 @@
 
 ## Copy/paste prompt for the next Manus session
 
-Continue work on the NazmiPOD app in `ahmednazmi014-design/nazmipodtest`. Fetch/check out `feature/nazmipod-ops-suite` before inspecting changes. The feature branch contains the current local work and this handoff. Render auto-deploys `main` only. The user said to deploy this feature update after being warned that the JSON store may reset; treat that as approval for this release, with the password change deferred. It is not approval for recurring paid storage. Do not deploy future code until a durable store is selected and verified. Do not expose, copy, or ask the user to resend the temporary Owner password. Never log passwords, photos, tracking tokens, or private delivery contents.
+Continue work on the NazmiPOD app in `ahmednazmi014-design/nazmipodtest`. Fetch/check out `feature/nazmipod-ops-suite` before inspecting changes. The feature branch contains the current local work and this handoff. Render auto-deploys `main` only. The user explicitly approved continuing on the feature branch only. Do not merge or deploy until Supabase server credentials are configured and restart retention is verified. Do not expose, copy, or ask the user to resend the temporary Owner password. Never log passwords, photos, tracking tokens, or private delivery contents.
 
-The user asked for an improved invoice/POD PDF, delivery calendar, bulk delivery import, multiple delivery photos, rider elapsed/dwell timing, availability checks, recurring schedules, partial-delivery follow-ups, staff POD notifications, offline driver sync, barcode scanning, a customer tracking page, and a handoff file. Use in-app notifications (no SMS/email credentials configured), a manual barcode entry fallback, and tokenized public tracking. The current feature branch has passed TypeScript, all unit tests, production build, and `git diff --check` in this workspace. Run the same checks again before release.
+The user asked for an improved invoice/POD PDF, delivery calendar, bulk delivery import, multiple delivery photos, rider elapsed/dwell timing, availability checks, recurring schedules, partial-delivery follow-ups, staff POD notifications, offline driver sync, barcode scanning, a customer tracking page, a rider destination map, customer ETA/timeline/confirmation/issues, session controls, and a handoff file. Use in-app notifications (no SMS/email credentials configured), a manual barcode entry fallback, and tokenized public tracking. The current feature branch has passed TypeScript, all unit tests, production build, and `git diff --check` in this workspace. Run the same checks again before release.
 
-**Critical storage issue:** the app stores its records in a local JSON file via `server/store.ts`. Render confirmed the production web service is on the Free plan, has no attached persistent disk, and there is no Postgres instance in the confirmed workspace. The JSON filesystem is ephemeral; a redeploy/restart has already reset production state once. The user authorized this feature deployment after being warned the current JSON data/account may reset; the Owner may be provisioned again from the still-configured bootstrap environment. This does not solve data retention: subsequent redeploys can reset data again. Do not create a paid disk/database or change billing without explicit approval. Before the next release, obtain approval for a durable storage option, implement/configure and verify it, preserve/migrate any current data, then confirm records survive a restart.
+**Storage status:** the connected Supabase project is active and now has a private `public.nazmi_pod_store` JSONB table with RLS enabled and no anon/authenticated policies. The server uses it when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured; otherwise it retains the local JSON fallback for development/tests. Do not merge or deploy until the Render service has the server-only service key, a test record survives a restart/redeploy, and the current production data migration plan is confirmed. Do not create a paid disk or change billing without explicit approval.
 
 ## Changes on the feature branch
 
@@ -23,7 +23,9 @@ The user asked for an improved invoice/POD PDF, delivery calendar, bulk delivery
 - **Driver workflow:** multiple photo selection (up to three, compressed), per-photo capture timestamp/current GPS/note, start/arrival/completion timestamps, live trip and at-stop timers, and a challan/carton scan panel. Camera scanning uses the browser `BarcodeDetector` when supported; manual/USB scanner entry remains available. The server prevents duplicate scans and limits scans to dispatched carton quantity.
 - **Offline POD:** added a user-scoped IndexedDB outbox with idempotent submission IDs, automatic retry on reconnect, and retained evidence plus a visible warning when server data changed and a manual review is needed.
 - **Notifications:** added in-app alerts when a POD is submitted, verified, or sent back for correction; authorized dispatch staff and the assigned rider receive relevant events.
-- **Customer tracking:** added an expiring/revocable token link and a read-only `/track/:token` page with limited status, carton count, schedule, last update, and live rider location only while in transit. The route is registered in the SPA and the public page is marked `noindex`.
+- **Customer tracking:** added an expiring/revocable token link and a passwordless `/track/:token` page with status, carton count, schedule, destination, ETA, timeline, receipt confirmation, issue reporting, and live rider location only while in transit. The route is registered in the SPA and the public page is marked `noindex`.
+- **Supabase durability:** added the private Supabase state adapter, startup load, queued writes, health storage reporting, and the `create_nazmi_pod_store` migration in the connected project.
+- **Account security:** removed forced first-login password blocking and added optional password change plus active-session listing/revocation.
 - **Tests:** added schedule conflict/month-end recurrence tests and PDF invoice/photo-caption tests.
 
 ## Validation recorded
@@ -35,12 +37,12 @@ The user asked for an improved invoice/POD PDF, delivery calendar, bulk delivery
 
 ## Release checklist
 
-1. Inspect Render's exact current service and storage state; verify a durable store exists before deploying.
-2. Decide and approve any recurring cost for a persistent disk or database. There is currently no database to migrate into.
-3. Test migration/backup and a restart/redeploy retention check in a safe environment.
-4. Test the public `/track/:token` route, revoke/expiry behavior, PDF download, photo metadata, camera scan on a supported mobile browser, offline sync, and delivery time calculations.
+1. Add `SUPABASE_SERVICE_ROLE_KEY` and, optionally, `SUPABASE_URL=https://ahqisqsadtgifuzpygim.supabase.co` to Render server environment variables; never add the key to the repository or client.
+2. Run the feature branch in a safe environment, create one test delivery, restart/redeploy, and confirm `/api/health` reports `storage: "supabase"` and the record remains.
+3. Decide how any existing JSON production records should be imported before the first Supabase-backed release; do not silently discard them.
+4. Test the public `/track/:token` route, revoke/expiry behavior, ETA/timeline, customer confirmation/issues, rider destination map, PDF download, photo metadata, camera scan on a supported mobile browser, offline sync, and delivery time calculations.
 5. Only then merge/release to `main`; check `/api/health` and confirm existing data remains.
-6. After durable storage is active, have Ahmed change the temporary password, then remove/rotate the bootstrap variables safely without resetting the store.
+6. After the Owner signs in successfully, rotate/remove bootstrap variables if desired. Password change is optional and is not forced by the application.
 
 ## Security notes
 

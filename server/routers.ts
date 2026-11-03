@@ -26,6 +26,7 @@ import {
   findUserByIdentifier,
   findUserById,
   hashPassword,
+  hashSessionToken,
   nextDeliveryId,
   publicUser,
   readStore,
@@ -264,6 +265,34 @@ export const appRouter = router({
       });
       return { success: true } as const;
     }),
+    sessions: protectedProcedure.query(({ ctx }) => {
+      const currentToken = getSessionToken(ctx.req);
+      const currentHash = currentToken ? hashSessionToken(currentToken) : "";
+      return readStore()
+        .sessions.filter(session => session.userId === ctx.user.id)
+        .map(session => ({
+          id: session.tokenHash,
+          label: `Session · ${session.tokenHash.slice(-8)}`,
+          createdAt: session.createdAt,
+          expiresAt: session.expiresAt,
+          current: session.tokenHash === currentHash,
+        }));
+    }),
+    revokeSession: protectedProcedure
+      .input(z.object({ sessionId: z.string().min(20).max(200) }))
+      .mutation(({ input, ctx }) =>
+        withStore(store => {
+          const before = store.sessions.length;
+          store.sessions = store.sessions.filter(
+            session =>
+              !(
+                session.tokenHash === input.sessionId &&
+                session.userId === ctx.user.id
+              )
+          );
+          return { revoked: store.sessions.length < before } as const;
+        })
+      ),
   }),
 
   dashboard: router({
@@ -1343,6 +1372,45 @@ export const appRouter = router({
           });
         const d = findDelivery(t.deliveryId, store)!;
         const live = ["Out for Delivery", "Arrived"].includes(d.status);
+        const confirmation = (store.customerConfirmations ?? [])
+          .filter(item => item.deliveryId === d.id)
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+        const etaMinutes = live
+          ? Math.max(5, Math.round((d.expectedDurationMinutes ?? 120) / 2))
+          : null;
+        const timeline = [
+          {
+            key: "created",
+            label: "Order created",
+            at: d.createdAt,
+            complete: true,
+          },
+          {
+            key: "scheduled",
+            label: "Scheduled",
+            at: d.scheduledAt,
+            complete: true,
+          },
+          {
+            key: "started",
+            label: "On the way",
+            at: d.startedAt ?? null,
+            complete: live || terminalDeliveryStatuses.has(d.status),
+          },
+          {
+            key: "arrived",
+            label: "Arrived",
+            at: d.arrivedAt ?? null,
+            complete:
+              d.status === "Arrived" || terminalDeliveryStatuses.has(d.status),
+          },
+          {
+            key: "completed",
+            label: "Completed",
+            at: d.completedAt,
+            complete: terminalDeliveryStatuses.has(d.status),
+          },
+        ];
         return {
           companyName: store.settings.companyName,
           deliveryId: d.id,
@@ -1350,6 +1418,22 @@ export const appRouter = router({
           scheduledAt: d.scheduledAt,
           deliveredCartons: d.deliveredCartons,
           cartons: d.cartons,
+          customer: d.customer,
+          address: d.address,
+          route: d.route,
+          etaMinutes,
+          estimatedArrival: etaMinutes
+            ? new Date(Date.now() + etaMinutes * 60_000).toISOString()
+            : null,
+          timeline,
+          confirmation: confirmation
+            ? {
+                received: confirmation.received,
+                customerName: confirmation.customerName,
+                notes: confirmation.notes,
+                createdAt: confirmation.createdAt,
+              }
+            : null,
           updatedAt: d.updatedAt,
           gps:
             live && d.gps
@@ -1357,6 +1441,115 @@ export const appRouter = router({
               : null,
         };
       }),
+    customerConfirm: publicProcedure
+      .input(
+        z.object({
+          token: z.string().min(30).max(200),
+          customerName: z.string().min(2).max(120),
+          received: z.boolean(),
+          notes: z.string().max(500).optional(),
+        })
+      )
+      .mutation(({ input }) =>
+        withStore(store => {
+          const hash = createHash("sha256").update(input.token).digest("hex");
+          const tracking = (store.trackingTokens ?? []).find(
+            item =>
+              item.hash === hash &&
+              !item.revokedAt &&
+              new Date(item.expiresAt) > new Date()
+          );
+          if (!tracking)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Tracking link unavailable.",
+            });
+          const delivery = findDelivery(tracking.deliveryId, store);
+          if (!delivery)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Delivery not found.",
+            });
+          store.customerConfirmations ??= [];
+          const confirmation = {
+            id: randomUUID(),
+            deliveryId: delivery.id,
+            tokenHash: hash,
+            customerName: input.customerName.trim(),
+            received: input.received,
+            notes: input.notes?.trim() ?? "",
+            createdAt: new Date().toISOString(),
+          };
+          store.customerConfirmations.unshift(confirmation);
+          addAudit(store, {
+            action: "customer_confirmation",
+            actorId: null,
+            actorName: confirmation.customerName,
+            targetId: delivery.id,
+            details: input.received
+              ? "Customer confirmed receipt"
+              : "Customer reported a delivery issue from tracking page",
+          });
+          return { success: true as const };
+        })
+      ),
+    customerIssue: publicProcedure
+      .input(
+        z.object({
+          token: z.string().min(30).max(200),
+          issue: z.enum([
+            "Missing cartons",
+            "Damaged goods",
+            "Wrong delivery",
+            "Late delivery",
+            "Other",
+          ]),
+          message: z.string().min(2).max(1000),
+          contact: z.string().max(160).optional(),
+        })
+      )
+      .mutation(({ input }) =>
+        withStore(store => {
+          const hash = createHash("sha256").update(input.token).digest("hex");
+          const tracking = (store.trackingTokens ?? []).find(
+            item =>
+              item.hash === hash &&
+              !item.revokedAt &&
+              new Date(item.expiresAt) > new Date()
+          );
+          if (!tracking)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Tracking link unavailable.",
+            });
+          const delivery = findDelivery(tracking.deliveryId, store);
+          if (!delivery)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Delivery not found.",
+            });
+          store.customerIssues ??= [];
+          const issue = {
+            id: randomUUID(),
+            deliveryId: delivery.id,
+            tokenHash: hash,
+            issue: input.issue,
+            message: input.message.trim(),
+            contact: input.contact?.trim() ?? "",
+            createdAt: new Date().toISOString(),
+            resolvedAt: null,
+          };
+          store.customerIssues.unshift(issue);
+          addAudit(store, {
+            action: "customer_issue_reported",
+            actorId: null,
+            actorName: "Customer",
+            targetId: delivery.id,
+            details: `${input.issue}: ${input.message.trim()}`,
+          });
+          return { success: true as const };
+        })
+      ),
   }),
   notifications: router({
     list: protectedProcedure.query(({ ctx }) =>

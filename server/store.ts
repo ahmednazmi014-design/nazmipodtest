@@ -12,6 +12,11 @@ import {
   existsSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  isSupabaseStoreConfigured,
+  loadSupabaseStore,
+  saveSupabaseStore,
+} from "./supabase-store";
 
 export type Role =
   | "Owner"
@@ -110,6 +115,27 @@ export type AuditEntry = {
   createdAt: string;
 };
 
+export type CustomerConfirmation = {
+  id: string;
+  deliveryId: string;
+  tokenHash: string;
+  customerName: string;
+  received: boolean;
+  notes: string;
+  createdAt: string;
+};
+
+export type CustomerIssue = {
+  id: string;
+  deliveryId: string;
+  tokenHash: string;
+  issue: string;
+  message: string;
+  contact: string;
+  createdAt: string;
+  resolvedAt: string | null;
+};
+
 export type Store = {
   version: 1;
   users: StoredUser[];
@@ -136,6 +162,8 @@ export type Store = {
     expiresAt: string;
     revokedAt: string | null;
   }[];
+  customerConfirmations?: CustomerConfirmation[];
+  customerIssues?: CustomerIssue[];
   settings: {
     companyName: string;
     address: string;
@@ -154,6 +182,9 @@ const dataFile =
     "nazmi-pod.json"
   );
 
+let memoryStore: Store | null = null;
+let remoteSaveChain = Promise.resolve();
+
 const blankStore = (): Store => ({
   version: 1,
   users: [],
@@ -162,6 +193,8 @@ const blankStore = (): Store => ({
   audit: [],
   notifications: [],
   trackingTokens: [],
+  customerConfirmations: [],
+  customerIssues: [],
   settings: {
     companyName: "Nazmi Packaging Company (Pvt.) Ltd.",
     address: "",
@@ -177,42 +210,80 @@ function ensureParent() {
   mkdirSync(dirname(dataFile), { recursive: true });
 }
 
-export function readStore(): Store {
+function normalizeStore(parsed: Store): Store {
+  return {
+    ...blankStore(),
+    ...parsed,
+    notifications: parsed.notifications ?? [],
+    trackingTokens: parsed.trackingTokens ?? [],
+    customerConfirmations: parsed.customerConfirmations ?? [],
+    customerIssues: parsed.customerIssues ?? [],
+    deliveries: (parsed.deliveries ?? []).map(delivery => ({
+      ...delivery,
+      photos: delivery.photos ?? [],
+      gpsTrail: delivery.gpsTrail ?? [],
+      deliveredCartons: delivery.deliveredCartons ?? 0,
+      rejectedCartons: delivery.rejectedCartons ?? 0,
+      scannedBarcodes: delivery.scannedBarcodes ?? [],
+      photoMetadata: delivery.photoMetadata ?? [],
+      proofSubmissionIds: delivery.proofSubmissionIds ?? [],
+      startedAt: delivery.startedAt ?? null,
+      arrivedAt: delivery.arrivedAt ?? null,
+      parentDeliveryId: delivery.parentDeliveryId ?? null,
+    })),
+    users: (parsed.users ?? []).map(user => ({
+      ...user,
+      username: user.username ?? "",
+      mustChangePassword: user.mustChangePassword ?? false,
+    })),
+  };
+}
+
+function readDiskStore(): Store {
   try {
     if (!existsSync(dataFile)) return blankStore();
     const parsed = JSON.parse(readFileSync(dataFile, "utf8")) as Store;
     if (parsed.version !== 1) return blankStore();
-    return {
-      ...blankStore(),
-      ...parsed,
-      notifications: parsed.notifications ?? [],
-      trackingTokens: parsed.trackingTokens ?? [],
-      deliveries: (parsed.deliveries ?? []).map(delivery => ({
-        ...delivery,
-        photos: delivery.photos ?? [],
-        gpsTrail: delivery.gpsTrail ?? [],
-        deliveredCartons: delivery.deliveredCartons ?? 0,
-        rejectedCartons: delivery.rejectedCartons ?? 0,
-        scannedBarcodes: delivery.scannedBarcodes ?? [],
-        photoMetadata: delivery.photoMetadata ?? [],
-        proofSubmissionIds: delivery.proofSubmissionIds ?? [],
-        startedAt: delivery.startedAt ?? null,
-        arrivedAt: delivery.arrivedAt ?? null,
-        parentDeliveryId: delivery.parentDeliveryId ?? null,
-      })),
-      users: (parsed.users ?? []).map(user => ({
-        ...user,
-        username: user.username ?? "",
-        mustChangePassword: user.mustChangePassword ?? false,
-      })),
-    };
+    return normalizeStore(parsed);
   } catch (error) {
     console.error("[Store] Could not read data file:", error);
     return blankStore();
   }
 }
 
+export async function initializeStore() {
+  if (memoryStore) return memoryStore;
+  if (isSupabaseStoreConfigured()) {
+    try {
+      const remote = await loadSupabaseStore();
+      memoryStore = remote ? normalizeStore(remote) : blankStore();
+      if (!remote) await saveSupabaseStore(memoryStore);
+      return memoryStore;
+    } catch (error) {
+      console.error(
+        "[Store] Supabase unavailable; using local fallback:",
+        error
+      );
+    }
+  }
+  memoryStore = readDiskStore();
+  return memoryStore;
+}
+
+export function readStore(): Store {
+  if (!isSupabaseStoreConfigured()) return readDiskStore();
+  if (!memoryStore) memoryStore = readDiskStore();
+  return memoryStore;
+}
+
 export function writeStore(store: Store) {
+  if (isSupabaseStoreConfigured()) {
+    memoryStore = store;
+    remoteSaveChain = remoteSaveChain
+      .then(() => saveSupabaseStore(store))
+      .catch(error => console.error("[Store] Supabase save failed:", error));
+    return;
+  }
   ensureParent();
   const temporaryFile = `${dataFile}.${process.pid}.tmp`;
   writeFileSync(temporaryFile, JSON.stringify(store, null, 2), { mode: 0o600 });
@@ -331,7 +402,7 @@ export function bootstrapOwnerFromEnvironment() {
       role: "Owner",
       passwordHash: hashPassword(password),
       active: true,
-      mustChangePassword: true,
+      mustChangePassword: false,
       createdAt: now,
       lastSignedIn: null,
     };
@@ -351,7 +422,7 @@ export function findUserById(id: string, store = readStore()) {
   return store.users.find(user => user.id === id);
 }
 
-function hashToken(token: string) {
+export function hashSessionToken(token: string) {
   return scryptSync(token, "nazmi-session", 32).toString("hex");
 }
 
@@ -366,7 +437,7 @@ export function createSession(userId: string) {
       session => new Date(session.expiresAt) > now && session.userId !== userId
     );
     store.sessions.push({
-      tokenHash: hashToken(token),
+      tokenHash: hashSessionToken(token),
       userId,
       createdAt: now.toISOString(),
       expiresAt,
@@ -379,13 +450,13 @@ export function deleteSession(token: string | undefined) {
   if (!token) return;
   withStore(store => {
     store.sessions = store.sessions.filter(
-      session => session.tokenHash !== hashToken(token)
+      session => session.tokenHash !== hashSessionToken(token)
     );
   });
 }
 
 export function revokeOtherSessions(userId: string, currentToken: string) {
-  const currentHash = hashToken(currentToken);
+  const currentHash = hashSessionToken(currentToken);
   withStore(store => {
     store.sessions = store.sessions.filter(
       session => session.userId !== userId || session.tokenHash === currentHash
@@ -398,7 +469,7 @@ export function getUserBySessionToken(token: string | undefined) {
   const store = readStore();
   const session = store.sessions.find(
     item =>
-      item.tokenHash === hashToken(token) &&
+      item.tokenHash === hashSessionToken(token) &&
       new Date(item.expiresAt) > new Date()
   );
   if (!session) return undefined;
