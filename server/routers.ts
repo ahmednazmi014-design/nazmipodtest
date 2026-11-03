@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -87,6 +88,83 @@ function serializeDelivery(
     gps: delivery.gps,
     gpsTrailCount: delivery.gpsTrail.length,
   };
+}
+
+const terminalDeliveryStatuses = new Set([
+  "Delivered",
+  "Partially Delivered",
+  "Failed",
+  "Cancelled",
+]);
+
+function addRecurrenceDate(
+  value: string,
+  frequency: "weekly" | "monthly",
+  step: number
+) {
+  const date = new Date(value);
+  if (frequency === "weekly") {
+    date.setUTCDate(date.getUTCDate() + step * 7);
+  } else {
+    const day = date.getUTCDate();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + step);
+    const lastDay = new Date(
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)
+    ).getUTCDate();
+    date.setUTCDate(Math.min(day, lastDay));
+  }
+  return date.toISOString();
+}
+
+function assertScheduleAvailable(
+  store: ReturnType<typeof readStore>,
+  input: {
+    scheduledAt: string;
+    expectedDurationMinutes: number;
+    assignedDriverId?: string | null;
+    vehicle?: string | null;
+    ignoreDeliveryId?: string;
+  }
+) {
+  const start = Date.parse(input.scheduledAt);
+  if (!Number.isFinite(start))
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Enter a valid delivery date and time.",
+    });
+  const end = start + input.expectedDurationMinutes * 60_000;
+  const vehicle = input.vehicle?.trim().toLocaleLowerCase() ?? "";
+  if (!input.assignedDriverId && !vehicle) return;
+  const conflict = store.deliveries.find(item => {
+    if (
+      item.id === input.ignoreDeliveryId ||
+      terminalDeliveryStatuses.has(item.status)
+    )
+      return false;
+    const sameDriver =
+      !!input.assignedDriverId &&
+      item.assignedDriverId === input.assignedDriverId;
+    const sameVehicle =
+      !!vehicle && item.vehicle?.trim().toLocaleLowerCase() === vehicle;
+    if (!sameDriver && !sameVehicle) return false;
+    const existingStart = Date.parse(item.scheduledAt);
+    if (!Number.isFinite(existingStart)) return false;
+    const existingDuration = item.expectedDurationMinutes ?? 120;
+    const existingEnd = existingStart + existingDuration * 60_000;
+    return start < existingEnd && end > existingStart;
+  });
+  if (conflict) {
+    const resource =
+      input.assignedDriverId &&
+      conflict.assignedDriverId === input.assignedDriverId
+        ? "Driver"
+        : "vehicle";
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `${resource} is already booked for ${conflict.id} (${conflict.challan}) at ${conflict.scheduledAt}. Choose a different time, Driver, or vehicle.`,
+    });
+  }
 }
 
 export const appRouter = router({
@@ -519,6 +597,11 @@ export const appRouter = router({
           vehicle: z.string().max(50).optional(),
           route: z.string().max(100).optional(),
           notes: z.string().max(1000).optional(),
+          unitPrice: z.number().nonnegative().max(1_000_000).optional(),
+          taxPercent: z.number().min(0).max(100).optional(),
+          expectedDurationMinutes: z.number().int().min(1).max(1440).optional(),
+          recurrenceFrequency: z.enum(["none", "weekly", "monthly"]).optional(),
+          recurrenceCount: z.number().int().min(1).max(12).optional(),
         })
       )
       .mutation(({ input, ctx }) => {
@@ -541,16 +624,40 @@ export const appRouter = router({
               code: "BAD_REQUEST",
               message: "Choose an active Driver account.",
             });
+          const frequency = input.recurrenceFrequency ?? "none";
+          const recurrenceCount = input.recurrenceCount ?? 1;
+          if (frequency === "none" && recurrenceCount > 1)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Choose a repeat frequency for multiple deliveries.",
+            });
+          const recurrenceGroupId = recurrenceCount > 1 ? randomUUID() : null;
+          const challans = Array.from(
+            { length: recurrenceCount },
+            (_, index) =>
+              index === 0
+                ? input.challan.trim()
+                : `${input.challan.trim()}-R${String(index + 1).padStart(2, "0")}`
+          );
+          if (challans.some(challan => challan.length > 80))
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "The base challan is too long for the generated repeat suffixes.",
+            });
+          const challanKeys = challans.map(challan => challan.toLowerCase());
           if (
-            store.deliveries.some(
-              item =>
-                item.challan.toLowerCase() ===
-                input.challan.trim().toLowerCase()
+            new Set(challanKeys).size !== challanKeys.length ||
+            challanKeys.some(challan =>
+              store.deliveries.some(
+                item => item.challan.toLowerCase() === challan
+              )
             )
           )
             throw new TRPCError({
               code: "CONFLICT",
-              message: "A delivery with this challan already exists.",
+              message:
+                "One or more challans in this delivery series already exist.",
             });
           const now = new Date().toISOString();
           const delivery = {
@@ -581,16 +688,50 @@ export const appRouter = router({
             updatedAt: now,
             completedAt: null,
             verifiedAt: null,
+            unitPrice: input.unitPrice ?? null,
+            taxPercent: input.taxPercent ?? null,
+            expectedDurationMinutes: input.expectedDurationMinutes ?? 120,
+            startedAt: null,
+            arrivedAt: null,
+            parentDeliveryId: null,
+            recurrenceGroupId,
+            scannedBarcodes: [],
+            photoMetadata: [],
+            proofSubmissionIds: [],
           };
+          assertScheduleAvailable(store, delivery);
           store.deliveries.unshift(delivery);
+          for (let index = 1; index < recurrenceCount; index += 1) {
+            const repeated = {
+              ...delivery,
+              id: nextDeliveryId(store),
+              challan: challans[index],
+              scheduledAt: addRecurrenceDate(
+                input.scheduledAt,
+                frequency as "weekly" | "monthly",
+                index
+              ),
+              startedAt: null,
+              arrivedAt: null,
+              completedAt: null,
+              verifiedAt: null,
+              createdAt: now,
+              updatedAt: now,
+            };
+            assertScheduleAvailable(store, repeated);
+            store.deliveries.unshift(repeated);
+          }
           addAudit(store, {
             action: "delivery_created",
             actorId: ctx.user.id,
             actorName: ctx.user.name,
             targetId: delivery.id,
-            details: `${delivery.id} created for ${delivery.customer}`,
+            details: `${delivery.id} created for ${delivery.customer}${recurrenceCount > 1 ? ` with ${recurrenceCount - 1} scheduled repeats` : ""}`,
           });
-          return serializeDelivery(delivery, store);
+          return {
+            ...serializeDelivery(delivery, store),
+            seriesCreatedCount: recurrenceCount,
+          };
         });
       }),
     updateStatus: protectedProcedure
@@ -630,6 +771,10 @@ export const appRouter = router({
           const previous = delivery.status;
           delivery.status = input.status as DeliveryStatus;
           delivery.updatedAt = new Date().toISOString();
+          if (input.status === "Out for Delivery")
+            delivery.startedAt ??= delivery.updatedAt;
+          if (input.status === "Arrived")
+            delivery.arrivedAt ??= delivery.updatedAt;
           if (
             ["Delivered", "Partially Delivered", "Failed"].includes(
               input.status
@@ -693,6 +838,19 @@ export const appRouter = router({
       .input(
         z.object({
           deliveryId: z.string(),
+          submissionId: z.string().min(8).max(120).optional(),
+          expectedUpdatedAt: z.string().max(80).optional(),
+          photoMetadata: z
+            .array(
+              z.object({
+                capturedAt: z.string().max(80),
+                lat: z.number().min(-90).max(90).optional(),
+                lng: z.number().min(-180).max(180).optional(),
+                note: z.string().max(200).optional(),
+              })
+            )
+            .max(3)
+            .optional(),
           deliveredCartons: z.number().int().nonnegative(),
           rejectedCartons: z.number().int().nonnegative().optional(),
           notes: z.string().max(1000).optional(),
@@ -724,6 +882,29 @@ export const appRouter = router({
               message: "Drivers can only submit POD for their own assignment.",
             });
           if (
+            input.submissionId &&
+            delivery.proofSubmissionIds?.includes(input.submissionId)
+          )
+            return serializeDelivery(delivery, store);
+          if (
+            input.expectedUpdatedAt &&
+            input.expectedUpdatedAt !== delivery.updatedAt
+          )
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                "Delivery changed since this POD was queued. Resolve the conflict before retrying.",
+            });
+          if (
+            input.photoMetadata &&
+            input.photoMetadata.length !== (input.photos ?? []).length
+          )
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "Each POD photo must have exactly one matching metadata record.",
+            });
+          if (
             input.deliveredCartons + (input.rejectedCartons ?? 0) >
             delivery.cartons
           )
@@ -736,6 +917,12 @@ export const appRouter = router({
           delivery.rejectedCartons = input.rejectedCartons ?? 0;
           delivery.proofNotes = input.notes?.trim() ?? "";
           delivery.photos = input.photos ?? delivery.photos;
+          delivery.photoMetadata = input.photoMetadata ?? [];
+          if (input.submissionId)
+            delivery.proofSubmissionIds = [
+              ...(delivery.proofSubmissionIds ?? []),
+              input.submissionId,
+            ].slice(-100);
           delivery.proofStatus = "Ready";
           delivery.status =
             input.deliveredCartons === delivery.cartons
@@ -743,6 +930,27 @@ export const appRouter = router({
               : "Partially Delivered";
           delivery.completedAt = new Date().toISOString();
           delivery.updatedAt = delivery.completedAt;
+          store.notifications ??= [];
+          for (const u of store.users.filter(
+            u =>
+              u.active &&
+              [
+                "Owner",
+                "Director",
+                "Dispatch Manager",
+                "Dispatch Staff",
+                "Delivery Supervisor",
+              ].includes(u.role)
+          ))
+            store.notifications.unshift({
+              id: randomUUID(),
+              userId: u.id,
+              deliveryId: delivery.id,
+              type: "pod_submitted",
+              message: `POD submitted for ${delivery.id}`,
+              createdAt: delivery.updatedAt,
+              readAt: null,
+            });
           addAudit(store, {
             action: "proof_submitted",
             actorId: ctx.user.id,
@@ -781,6 +989,28 @@ export const appRouter = router({
             ? new Date().toISOString()
             : null;
           delivery.updatedAt = new Date().toISOString();
+          store.notifications ??= [];
+          for (const u of store.users.filter(
+            u =>
+              u.active &&
+              ([
+                "Owner",
+                "Director",
+                "Dispatch Manager",
+                "Dispatch Staff",
+                "Delivery Supervisor",
+              ].includes(u.role) ||
+                u.id === delivery.assignedDriverId)
+          ))
+            store.notifications.unshift({
+              id: randomUUID(),
+              userId: u.id,
+              deliveryId: delivery.id,
+              type: input.approved ? "pod_verified" : "pod_correction",
+              message: `${input.approved ? "POD verified" : "Correction requested"} for ${delivery.id}`,
+              createdAt: delivery.updatedAt,
+              readAt: null,
+            });
           addAudit(store, {
             action: input.approved ? "pod_verified" : "pod_flagged",
             actorId: ctx.user.id,
@@ -793,8 +1023,365 @@ export const appRouter = router({
           return serializeDelivery(delivery, store);
         });
       }),
+    bulkCreate: protectedProcedure
+      .input(
+        z.object({
+          items: z
+            .array(
+              z.object({
+                customer: z.string().min(2).max(160),
+                address: z.string().min(3).max(500),
+                contact: z.string().max(120).optional(),
+                challan: z.string().min(1).max(80),
+                reference: z.string().max(80).optional(),
+                product: z.string().max(160).optional(),
+                cartons: z.number().int().positive().max(100000),
+                scheduledAt: z.string().min(1),
+                assignedDriverId: z.string().uuid().nullable().optional(),
+                driverUsername: z.string().trim().max(80).optional(),
+                vehicle: z.string().max(50).optional(),
+                route: z.string().max(100).optional(),
+                notes: z.string().max(1000).optional(),
+                unitPrice: z.number().nonnegative().optional(),
+                taxPercent: z.number().min(0).max(100).optional(),
+                expectedDurationMinutes: z
+                  .number()
+                  .int()
+                  .min(1)
+                  .max(1440)
+                  .optional(),
+              })
+            )
+            .min(1)
+            .max(200),
+        })
+      )
+      .mutation(({ input, ctx }) => {
+        if (!canCreateDelivery(ctx.user.role))
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not permitted." });
+        return withStore(store => {
+          const seen = new Set<string>();
+          const resolved = input.items.map((x, i) => {
+            const challan = x.challan.trim().toLowerCase();
+            if (
+              seen.has(challan) ||
+              store.deliveries.some(d => d.challan.toLowerCase() === challan)
+            )
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: `Duplicate challan at row ${i + 1}.`,
+              });
+            seen.add(challan);
+            const u = x.driverUsername
+              ? store.users.find(
+                  v =>
+                    v.active &&
+                    v.role === "Driver" &&
+                    v.username.toLowerCase() === x.driverUsername!.toLowerCase()
+                )
+              : undefined;
+            if (x.driverUsername && !u)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `Unknown active Driver username at row ${i + 1}.`,
+              });
+            const driverId = x.driverUsername
+              ? u!.id
+              : (x.assignedDriverId ?? null);
+            if (driverId) {
+              const assigned = findUserById(driverId, store);
+              if (!assigned || assigned.role !== "Driver" || !assigned.active)
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: `Inactive or invalid Driver at row ${i + 1}.`,
+                });
+            }
+            return { x, driverId };
+          });
+          const created = resolved.map(({ x, driverId }) => {
+            const now = new Date().toISOString();
+            const d: any = {
+              id: nextDeliveryId(store),
+              customer: x.customer.trim(),
+              address: x.address.trim(),
+              contact: x.contact ?? "",
+              challan: x.challan.trim(),
+              reference: x.reference ?? "",
+              product: x.product ?? "",
+              cartons: x.cartons,
+              deliveredCartons: 0,
+              rejectedCartons: 0,
+              scheduledAt: x.scheduledAt,
+              assignedDriverId: driverId,
+              vehicle: x.vehicle ?? "",
+              route: x.route ?? "",
+              status: driverId ? "Assigned" : "Scheduled",
+              notes: x.notes ?? "",
+              proofStatus: "Missing",
+              proofNotes: "",
+              photos: [],
+              photoMetadata: [],
+              gps: null,
+              gpsTrail: [],
+              scannedBarcodes: [],
+              proofSubmissionIds: [],
+              expectedDurationMinutes: x.expectedDurationMinutes ?? 120,
+              unitPrice: x.unitPrice ?? null,
+              taxPercent: x.taxPercent ?? null,
+              startedAt: null,
+              arrivedAt: null,
+              parentDeliveryId: null,
+              createdAt: now,
+              updatedAt: now,
+              completedAt: null,
+              verifiedAt: null,
+            };
+            assertScheduleAvailable(store, d);
+            store.deliveries.unshift(d);
+            addAudit(store, {
+              action: "delivery_created",
+              actorId: ctx.user.id,
+              actorName: ctx.user.name,
+              targetId: d.id,
+              details: `${d.id} created by CSV import for ${d.customer}`,
+            });
+            return serializeDelivery(d, store)!;
+          });
+          return { created: created.length, deliveries: created };
+        });
+      }),
+    createFollowUp: protectedProcedure
+      .input(
+        z.object({
+          deliveryId: z.string(),
+          challan: z.string().min(1).max(80),
+          scheduledAt: z.string().min(1),
+          assignedDriverId: z.string().uuid().optional(),
+          vehicle: z.string().max(50).optional(),
+          expectedDurationMinutes: z.number().int().min(1).max(1440).optional(),
+        })
+      )
+      .mutation(({ input, ctx }) => {
+        if (!canCreateDelivery(ctx.user.role))
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not permitted." });
+        return withStore(store => {
+          const parent = findDelivery(input.deliveryId, store);
+          if (!parent)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Delivery not found.",
+            });
+          if (parent.status !== "Partially Delivered")
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "Follow-up deliveries are only available after a partial POD.",
+            });
+          const challan = input.challan.trim();
+          if (
+            store.deliveries.some(
+              d => d.challan.toLowerCase() === challan.toLowerCase()
+            )
+          )
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Challan already exists.",
+            });
+          const remaining =
+            parent.cartons - parent.deliveredCartons - parent.rejectedCartons;
+          if (remaining <= 0)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "No cartons remain for follow-up.",
+            });
+          const driver = input.assignedDriverId
+            ? findUserById(input.assignedDriverId, store)
+            : undefined;
+          if (
+            input.assignedDriverId &&
+            (!driver || driver.role !== "Driver" || !driver.active)
+          )
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Choose an active Driver account.",
+            });
+          const now = new Date().toISOString();
+          const d: any = {
+            ...parent,
+            id: nextDeliveryId(store),
+            challan,
+            cartons: remaining,
+            deliveredCartons: 0,
+            rejectedCartons: 0,
+            scheduledAt: input.scheduledAt,
+            assignedDriverId: input.assignedDriverId ?? null,
+            vehicle: input.vehicle ?? parent.vehicle,
+            expectedDurationMinutes:
+              input.expectedDurationMinutes ??
+              parent.expectedDurationMinutes ??
+              120,
+            status: input.assignedDriverId ? "Assigned" : "Scheduled",
+            parentDeliveryId: parent.id,
+            recurrenceGroupId: null,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+            verifiedAt: null,
+            proofStatus: "Missing",
+            proofNotes: "",
+            photos: [],
+            photoMetadata: [],
+            gps: null,
+            gpsTrail: [],
+            scannedBarcodes: [],
+            proofSubmissionIds: [],
+          };
+          assertScheduleAvailable(store, d);
+          store.deliveries.unshift(d);
+          addAudit(store, {
+            action: "delivery_followup_created",
+            actorId: ctx.user.id,
+            actorName: ctx.user.name,
+            targetId: d.id,
+            details: `${d.id} follow-up for ${parent.id} (${remaining} cartons)`,
+          });
+          return serializeDelivery(d, store);
+        });
+      }),
+    recordCartonScan: protectedProcedure
+      .input(
+        z.object({
+          deliveryId: z.string(),
+          barcode: z.string().trim().min(1).max(160),
+        })
+      )
+      .mutation(({ input, ctx }) =>
+        withStore(store => {
+          const d = findDelivery(input.deliveryId, store);
+          if (!d)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Delivery not found.",
+            });
+          if (ctx.user.role === "Driver" && d.assignedDriverId !== ctx.user.id)
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "Not assigned.",
+            });
+          d.scannedBarcodes ??= [];
+          const duplicate = d.scannedBarcodes.includes(input.barcode);
+          if (!duplicate && d.scannedBarcodes.length >= d.cartons)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "All dispatched cartons have already been scanned.",
+            });
+          if (!duplicate) d.scannedBarcodes.push(input.barcode);
+          return { scannedCount: d.scannedBarcodes.length, duplicate };
+        })
+      ),
+    createTrackingLink: protectedProcedure
+      .input(z.object({ deliveryId: z.string() }))
+      .mutation(({ input, ctx }) => {
+        requireRole(ctx.user, [
+          "Owner",
+          "Director",
+          "Dispatch Manager",
+          "Dispatch Staff",
+        ]);
+        const token = randomBytes(32).toString("base64url");
+        const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
+        withStore(store => {
+          if (!findDelivery(input.deliveryId, store))
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Delivery not found.",
+            });
+          store.trackingTokens ??= [];
+          store.trackingTokens = store.trackingTokens.filter(
+            t => t.deliveryId !== input.deliveryId
+          );
+          store.trackingTokens.push({
+            hash: createHash("sha256").update(token).digest("hex"),
+            deliveryId: input.deliveryId,
+            expiresAt,
+            revokedAt: null,
+          });
+        });
+        return { url: `/track/${token}`, expiresAt };
+      }),
+    revokeTrackingLink: protectedProcedure
+      .input(z.object({ deliveryId: z.string() }))
+      .mutation(({ input, ctx }) => {
+        requireRole(ctx.user, [
+          "Owner",
+          "Director",
+          "Dispatch Manager",
+          "Dispatch Staff",
+        ]);
+        withStore(store => {
+          for (const t of store.trackingTokens ?? [])
+            if (t.deliveryId === input.deliveryId)
+              t.revokedAt = new Date().toISOString();
+        });
+        return { success: true as const };
+      }),
+    getPublicTracking: publicProcedure
+      .input(z.object({ token: z.string().min(30).max(200) }))
+      .query(({ input }) => {
+        const store = readStore();
+        const hash = createHash("sha256").update(input.token).digest("hex");
+        const t = (store.trackingTokens ?? []).find(
+          x =>
+            x.hash === hash &&
+            !x.revokedAt &&
+            new Date(x.expiresAt) > new Date()
+        );
+        if (!t)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Tracking link unavailable.",
+          });
+        const d = findDelivery(t.deliveryId, store)!;
+        const live = ["Out for Delivery", "Arrived"].includes(d.status);
+        return {
+          companyName: store.settings.companyName,
+          deliveryId: d.id,
+          status: d.status,
+          scheduledAt: d.scheduledAt,
+          deliveredCartons: d.deliveredCartons,
+          cartons: d.cartons,
+          updatedAt: d.updatedAt,
+          gps:
+            live && d.gps
+              ? { lat: d.gps.lat, lng: d.gps.lng, recordedAt: d.gps.recordedAt }
+              : null,
+        };
+      }),
   }),
-
+  notifications: router({
+    list: protectedProcedure.query(({ ctx }) =>
+      (readStore().notifications ?? [])
+        .filter(n => n.userId === ctx.user.id)
+        .slice(0, 50)
+    ),
+    markRead: protectedProcedure
+      .input(z.object({ notificationId: z.string() }))
+      .mutation(({ input, ctx }) =>
+        withStore(store => {
+          const n = (store.notifications ?? []).find(
+            x => x.id === input.notificationId && x.userId === ctx.user.id
+          );
+          if (!n)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Notification not found.",
+            });
+          n.readAt = new Date().toISOString();
+          return { success: true as const };
+        })
+      ),
+  }),
+  deliveriesExtra: router({}),
   settings: router({
     get: protectedProcedure.query(({ ctx }) => {
       if (!canManageOperations(ctx.user.role))

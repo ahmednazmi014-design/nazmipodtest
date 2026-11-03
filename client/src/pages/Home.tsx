@@ -12,10 +12,15 @@ import {
   ArrowRight,
   BarChart3,
   Bell,
+  CalendarDays,
   Check,
+  ChevronLeft,
+  ChevronRight,
   ChevronDown,
+  Clock3,
   CircleUserRound,
   ClipboardCheck,
+  Copy,
   Download,
   FileCheck2,
   FileText,
@@ -29,15 +34,24 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ScanLine,
   Settings2,
   ShieldCheck,
   Truck,
   UserPlus,
   UsersRound,
+  Upload,
   X,
   Zap,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { csvEscape, parseCsv } from "@/lib/csv";
+import {
+  listPendingProofs,
+  removePendingProof,
+  savePendingProof,
+} from "@/lib/offlinePodQueue";
+import PublicTracking from "./PublicTracking";
 import { toast } from "sonner";
 
 const roles = [
@@ -91,6 +105,9 @@ type Delivery = {
   reference: string;
   product: string;
   cartons: number;
+  unitPrice?: number | null;
+  taxPercent?: number | null;
+  expectedDurationMinutes?: number;
   deliveredCartons: number;
   rejectedCartons: number;
   scheduledAt: string;
@@ -113,9 +130,20 @@ type Delivery = {
   gpsTrailCount: number;
   createdAt: string;
   updatedAt: string;
+  startedAt?: string | null;
+  arrivedAt?: string | null;
   completedAt: string | null;
   verifiedAt: string | null;
   driver: { id: string; name: string; phone: string } | null;
+  photoMetadata?: {
+    capturedAt: string;
+    lat?: number | null;
+    lng?: number | null;
+    note?: string;
+  }[];
+  scannedCartons?: number;
+  scannedBarcodes?: string[];
+  parentDeliveryId?: string | null;
 };
 
 type Lang = "EN" | "UR";
@@ -276,6 +304,27 @@ function formatDate(value: string | null | undefined) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+function localDateKey(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function recurringDate(value: string, frequency: string, occurrence: number) {
+  const date = new Date(value);
+  if (frequency === "weekly") {
+    date.setDate(date.getDate() + 7 * occurrence);
+    return date;
+  }
+  const originalDay = date.getDate();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + occurrence);
+  date.setDate(
+    Math.min(
+      originalDay,
+      new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+    )
+  );
+  return date;
 }
 function initials(name: string) {
   return name
@@ -501,7 +550,15 @@ function PasswordChangeScreen({
   const [confirm, setConfirm] = useState("");
   const t = ui[lang];
   const update = (trpc.auth as any).changePassword.useMutation({
-    onSuccess: onChanged,
+    onSuccess: async () => {
+      toast.success(
+        lang === "UR"
+          ? "پاس ورڈ تبدیل اور محفوظ ہو گیا۔"
+          : "Password changed and saved. Continue with your new password."
+      );
+      await onChanged();
+    },
+    onError: (error: Error) => toast.error(error.message),
   });
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -850,14 +907,36 @@ function DeliveriesView({
   const [status, setStatus] = useState("All statuses");
   const [showCreate, setShowCreate] = useState(false);
   const [selected, setSelected] = useState<Delivery | null>(null);
-  const create = trpc.deliveries.create.useMutation({
+  const [layout, setLayout] = useState<"list" | "calendar">("list");
+  const [month, setMonth] = useState(() => new Date());
+  const [day, setDay] = useState(() => localDateKey(new Date()));
+  const [csvRows, setCsvRows] = useState<any[] | null>(null);
+  const utils = trpc.useUtils();
+  const bulk = trpc.deliveries.bulkCreate.useMutation({
     onSuccess: () => {
-      toast.success("Delivery created");
+      toast.success(`Imported ${csvRows?.length ?? 0} deliveries`);
+      setCsvRows(null);
+      void utils.deliveries.list.invalidate();
+    },
+  });
+  const create = trpc.deliveries.create.useMutation({
+    onError: error =>
+      toast.error(
+        error.data?.code === "CONFLICT"
+          ? `Schedule conflict: ${error.message}`
+          : error.message || "Could not create delivery"
+      ),
+    onSuccess: result => {
+      const total = Number((result as any)?.seriesCreatedCount ?? 1);
+      toast.success(
+        total > 1
+          ? `${total} deliveries created in the recurring series`
+          : "Delivery created"
+      );
       setShowCreate(false);
       navigate("deliveries");
     },
   });
-  const utils = trpc.useUtils();
   useEffect(() => {
     if (create.isSuccess) {
       void utils.deliveries.list.invalidate();
@@ -905,6 +984,90 @@ function DeliveriesView({
         </select>
         <Button
           variant="secondary"
+          onClick={() => setLayout(layout === "list" ? "calendar" : "list")}
+        >
+          {layout === "list" ? "Calendar" : "List"}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            const header =
+              "customer,address,challan,cartons,scheduledAt,contact,reference,product,driverUsername,vehicle,route,notes,unitPrice,taxPercent,expectedDurationMinutes";
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(
+              new Blob([header + "\n"], { type: "text/csv" })
+            );
+            a.download = "nazmi-delivery-template.csv";
+            a.click();
+          }}
+        >
+          Download template
+        </Button>
+        <label className="button secondary">
+          <Upload size={15} /> Import CSV
+          <input
+            hidden
+            type="file"
+            accept=".csv,text/csv"
+            onChange={async e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const rows = parseCsv(await file.text());
+                const headers = rows[0].map(h => h.trim());
+                const required = [
+                  "customer",
+                  "address",
+                  "challan",
+                  "cartons",
+                  "scheduledAt",
+                ];
+                const missing = required.filter(h => !headers.includes(h));
+                if (missing.length)
+                  throw new Error(`Missing columns: ${missing.join(", ")}`);
+                const items = rows.slice(1).map((r, i) => {
+                  const obj = Object.fromEntries(
+                    headers.map((h, j) => [h, r[j] ?? ""])
+                  );
+                  const cartons = Number(obj.cartons);
+                  if (
+                    !obj.customer ||
+                    !obj.address ||
+                    !obj.challan ||
+                    !Number.isInteger(cartons) ||
+                    cartons < 1 ||
+                    !obj.scheduledAt
+                  )
+                    throw new Error(
+                      `Invalid required values on CSV row ${i + 2}`
+                    );
+                  const driver = staff.find(
+                    m =>
+                      m.username.toLowerCase() ===
+                        String(obj.driverUsername || "").toLowerCase() &&
+                      m.role === "Driver"
+                  );
+                  return {
+                    ...obj,
+                    cartons,
+                    scheduledAt: new Date(obj.scheduledAt).toISOString(),
+                    ...(driver ? { driverUsername: driver.username } : {}),
+                  };
+                });
+                if (!items.length || items.length > 200)
+                  throw new Error("Import must contain 1–200 valid rows.");
+                setCsvRows(items);
+              } catch (err) {
+                toast.error(
+                  err instanceof Error ? err.message : "Could not read CSV"
+                );
+              }
+              e.currentTarget.value = "";
+            }}
+          />
+        </label>
+        <Button
+          variant="secondary"
           onClick={() => {
             const csv = [
               "Delivery,Customer,Status,Cartons,Delivered,Driver",
@@ -939,10 +1102,99 @@ function DeliveriesView({
           </span>
           <span className="muted">Server-synced</span>
         </div>
-        {filtered.length ? (
-          <DeliveryTable deliveries={filtered} onSelect={setSelected} />
+        {layout === "list" ? (
+          filtered.length ? (
+            <DeliveryTable deliveries={filtered} onSelect={setSelected} />
+          ) : (
+            <EmptyState text="No deliveries match this filter." />
+          )
         ) : (
-          <EmptyState text="No deliveries match this filter." />
+          <>
+            <div className="calendar-head">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  setMonth(
+                    new Date(month.getFullYear(), month.getMonth() - 1, 1)
+                  )
+                }
+              >
+                <ChevronLeft />
+              </Button>
+              <b>
+                {month.toLocaleDateString("en", {
+                  month: "long",
+                  year: "numeric",
+                })}
+              </b>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  setMonth(
+                    new Date(month.getFullYear(), month.getMonth() + 1, 1)
+                  )
+                }
+              >
+                <ChevronRight />
+              </Button>
+            </div>
+            <div className="calendar-grid">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(x => (
+                <b key={x}>{x}</b>
+              ))}
+              {Array.from(
+                {
+                  length: new Date(
+                    month.getFullYear(),
+                    month.getMonth(),
+                    1
+                  ).getDay(),
+                },
+                (_, i) => (
+                  <i key={`blank${i}`} />
+                )
+              )}
+              {Array.from(
+                {
+                  length: new Date(
+                    month.getFullYear(),
+                    month.getMonth() + 1,
+                    0
+                  ).getDate(),
+                },
+                (_, i) => {
+                  const date = localDateKey(
+                    new Date(month.getFullYear(), month.getMonth(), i + 1)
+                  );
+                  const count = filtered.filter(
+                    x => localDateKey(x.scheduledAt) === date
+                  ).length;
+                  return (
+                    <button
+                      key={date}
+                      className={day === date ? "selected" : ""}
+                      onClick={() => setDay(date)}
+                    >
+                      {i + 1}
+                      {count > 0 && <small>{count} deliveries</small>}
+                    </button>
+                  );
+                }
+              )}
+            </div>
+            <h3>Scheduled · {day}</h3>
+            {filtered.filter(x => localDateKey(x.scheduledAt) === day)
+              .length ? (
+              <DeliveryTable
+                deliveries={filtered.filter(
+                  x => localDateKey(x.scheduledAt) === day
+                )}
+                onSelect={setSelected}
+              />
+            ) : (
+              <EmptyState text="No deliveries scheduled for this day." />
+            )}
+          </>
         )}
       </section>
       {showCreate && (
@@ -952,6 +1204,52 @@ function DeliveriesView({
           onSubmit={input => create.mutate(input)}
           pending={create.isPending}
         />
+      )}
+      {csvRows && (
+        <Modal
+          title={`Import preview · ${csvRows.length} rows`}
+          onClose={() => setCsvRows(null)}
+        >
+          <p>Review the validated rows before creating deliveries.</p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Challan</th>
+                  <th>Cartons</th>
+                  <th>Driver username</th>
+                  <th>Scheduled</th>
+                </tr>
+              </thead>
+              <tbody>
+                {csvRows.slice(0, 20).map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.customer}</td>
+                    <td>{r.challan}</td>
+                    <td>{r.cartons}</td>
+                    <td>{r.driverUsername || "—"}</td>
+                    <td>{r.scheduledAt}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {csvRows.length > 20 && (
+            <p>Showing first 20 of {csvRows.length} rows.</p>
+          )}
+          <div className="modal-actions">
+            <Button variant="secondary" onClick={() => setCsvRows(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={bulk.isPending}
+              onClick={() => bulk.mutate({ items: csvRows })}
+            >
+              Confirm import
+            </Button>
+          </div>
+        </Modal>
       )}
       {selected && (
         <DeliveryDrawer
@@ -987,6 +1285,11 @@ function CreateDeliveryModal({
     vehicle: "",
     route: "",
     notes: "",
+    unitPrice: "",
+    taxPercent: "",
+    expectedDurationMinutes: "",
+    recurrenceFrequency: "none",
+    recurrenceCount: "",
   });
   const set = (key: string, value: string) =>
     setForm(current => ({ ...current, [key]: value }));
@@ -999,7 +1302,17 @@ function CreateDeliveryModal({
           onSubmit({
             ...form,
             cartons: Number(form.cartons),
+            scheduledAt: new Date(form.scheduledAt).toISOString(),
             assignedDriverId: form.assignedDriverId || null,
+            unitPrice: form.unitPrice ? Number(form.unitPrice) : undefined,
+            taxPercent: form.taxPercent ? Number(form.taxPercent) : undefined,
+            expectedDurationMinutes: form.expectedDurationMinutes
+              ? Number(form.expectedDurationMinutes)
+              : undefined,
+            recurrenceFrequency: form.recurrenceFrequency,
+            recurrenceCount: form.recurrenceCount
+              ? Number(form.recurrenceCount)
+              : undefined,
           });
         }}
       >
@@ -1087,6 +1400,94 @@ function CreateDeliveryModal({
             onChange={e => set("contact", e.target.value)}
           />
         </Field>
+        <Field label="Unit price (optional)">
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.unitPrice}
+            onChange={e => set("unitPrice", e.target.value)}
+          />
+        </Field>
+        <Field label="Tax (%) optional">
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={form.taxPercent}
+            onChange={e => set("taxPercent", e.target.value)}
+          />
+        </Field>
+        <Field label="Expected duration (minutes)">
+          <input
+            type="number"
+            min="1"
+            value={form.expectedDurationMinutes}
+            onChange={e => set("expectedDurationMinutes", e.target.value)}
+          />
+        </Field>
+        <Field label="Recurring frequency">
+          <select
+            value={form.recurrenceFrequency}
+            onChange={e => set("recurrenceFrequency", e.target.value)}
+          >
+            <option value="none">None</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </Field>
+        {form.recurrenceFrequency !== "none" && (
+          <Field label="Occurrences (API-supported)">
+            <input
+              type="number"
+              min="1"
+              max="12"
+              value={form.recurrenceCount}
+              onChange={e => set("recurrenceCount", e.target.value)}
+            />
+          </Field>
+        )}
+        {form.recurrenceFrequency !== "none" && form.scheduledAt && (
+          <div className="recurrence-preview">
+            <b>Recurring delivery preview</b>
+            <p>
+              The first challan will remain{" "}
+              <strong>{form.challan || "(enter challan)"}</strong>; later
+              challans use <strong>{form.challan || "BASE"}-R02, -R03…</strong>.
+              Schedule preview:
+            </p>
+            <ol>
+              {Array.from(
+                {
+                  length: Math.max(
+                    1,
+                    Math.min(6, Number(form.recurrenceCount) || 1)
+                  ),
+                },
+                (_, i) => {
+                  const d = recurringDate(
+                    form.scheduledAt,
+                    form.recurrenceFrequency,
+                    i
+                  );
+                  return (
+                    <li key={i}>
+                      {i === 0
+                        ? form.challan || "First delivery"
+                        : `${form.challan || "BASE"}-R${String(i + 1).padStart(2, "0")}`}{" "}
+                      · {d.toLocaleString()}
+                    </li>
+                  );
+                }
+              )}
+            </ol>
+            <small>
+              This previews the requested cadence; the server validates schedule
+              conflicts when you submit.
+            </small>
+          </div>
+        )}
         <Field label="Notes">
           <textarea
             value={form.notes}
@@ -1127,6 +1528,41 @@ function DeliveryDrawer({
       onClose();
     },
   });
+  const [trackingLink, setTrackingLink] = useState("");
+  const createLink = trpc.deliveries.createTrackingLink.useMutation({
+    onSuccess: result => {
+      const url = new URL(result.url, window.location.origin).toString();
+      setTrackingLink(url);
+      void navigator.clipboard?.writeText(url);
+      toast.success("Tracking link copied");
+    },
+  });
+  const revokeLink = trpc.deliveries.revokeTrackingLink.useMutation({
+    onSuccess: () => {
+      setTrackingLink("");
+      toast.success("Tracking link revoked");
+    },
+  });
+  const [showFollowUp, setShowFollowUp] = useState(false);
+  const [followUpChallan, setFollowUpChallan] = useState("");
+  const [followUpAt, setFollowUpAt] = useState("");
+  const utils = trpc.useUtils();
+  const followUp = trpc.deliveries.createFollowUp.useMutation({
+    onSuccess: () => {
+      toast.success("Follow-up delivery scheduled");
+      setShowFollowUp(false);
+      void utils.deliveries.list.invalidate();
+      void utils.dashboard.summary.invalidate();
+      onClose();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const undelivered =
+    delivery.cartons - delivery.deliveredCartons - delivery.rejectedCartons;
+  const canCreateFollowUp =
+    canManage(user.role) &&
+    delivery.status === "Partially Delivered" &&
+    undelivered > 0;
   const isDriver = user.role === "Driver";
   const canStart = ["Scheduled", "Assigned"].includes(delivery.status);
   const canArrive = delivery.status === "Out for Delivery";
@@ -1171,7 +1607,136 @@ function DeliveryDrawer({
           </b>
         </div>
       </div>
+      <div className="detail-timings">
+        {delivery.startedAt && (
+          <span>Started · {formatDate(delivery.startedAt)}</span>
+        )}
+        {delivery.arrivedAt && (
+          <span>Arrived · {formatDate(delivery.arrivedAt)}</span>
+        )}
+        {delivery.completedAt && delivery.startedAt && (
+          <span>
+            Trip time ·{" "}
+            {Math.max(
+              0,
+              Math.round(
+                (new Date(delivery.completedAt).getTime() -
+                  new Date(delivery.startedAt).getTime()) /
+                  60000
+              )
+            )}{" "}
+            min
+          </span>
+        )}
+        {delivery.completedAt && delivery.arrivedAt && (
+          <span>
+            At-stop time ·{" "}
+            {Math.max(
+              0,
+              Math.round(
+                (new Date(delivery.completedAt).getTime() -
+                  new Date(delivery.arrivedAt).getTime()) /
+                  60000
+              )
+            )}{" "}
+            min
+          </span>
+        )}
+      </div>
+      {delivery.parentDeliveryId && (
+        <p className="signature-note">
+          Follow-up for {delivery.parentDeliveryId}
+        </p>
+      )}
+      {canCreateFollowUp && !showFollowUp && (
+        <Button variant="secondary" onClick={() => setShowFollowUp(true)}>
+          <Plus size={15} />
+          Schedule follow-up · {undelivered} cartons remaining
+        </Button>
+      )}
+      {canCreateFollowUp && showFollowUp && (
+        <form
+          className="follow-up-form"
+          onSubmit={event => {
+            event.preventDefault();
+            if (
+              !followUpChallan.trim() ||
+              !Number.isFinite(Date.parse(followUpAt))
+            ) {
+              toast.error("Enter a new challan and a valid date/time.");
+              return;
+            }
+            followUp.mutate({
+              deliveryId: delivery.id,
+              challan: followUpChallan.trim(),
+              scheduledAt: new Date(followUpAt).toISOString(),
+              vehicle: delivery.vehicle || undefined,
+              expectedDurationMinutes: delivery.expectedDurationMinutes,
+            });
+          }}
+        >
+          <b>Schedule {undelivered} undelivered cartons</b>
+          <Field label="New follow-up challan">
+            <input
+              required
+              value={followUpChallan}
+              onChange={event => setFollowUpChallan(event.target.value)}
+            />
+          </Field>
+          <Field label="Follow-up date/time">
+            <input
+              required
+              type="datetime-local"
+              value={followUpAt}
+              onChange={event => setFollowUpAt(event.target.value)}
+            />
+          </Field>
+          <div className="modal-actions">
+            <Button variant="secondary" onClick={() => setShowFollowUp(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={followUp.isPending}>
+              {followUp.isPending ? "Scheduling…" : "Create follow-up"}
+            </Button>
+          </div>
+        </form>
+      )}
       <div className="detail-actions">
+        {!isDriver && (
+          <>
+            <Button
+              variant="secondary"
+              disabled={createLink.isPending}
+              onClick={() => createLink.mutate({ deliveryId: delivery.id })}
+            >
+              <Link2 size={14} />
+              Create/copy customer link
+            </Button>
+            {trackingLink && (
+              <>
+                <input
+                  readOnly
+                  value={trackingLink}
+                  aria-label="Customer tracking link"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    void navigator.clipboard?.writeText(trackingLink)
+                  }
+                >
+                  Copy link
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => revokeLink.mutate({ deliveryId: delivery.id })}
+                >
+                  Revoke link
+                </Button>
+              </>
+            )}
+          </>
+        )}
         {!isDriver &&
           delivery.proofStatus === "Ready" &&
           canVerify(user.role) && (
@@ -1197,7 +1762,7 @@ function DeliveryDrawer({
         {!isDriver && (
           <Button variant="secondary" onClick={() => downloadPod(delivery.id)}>
             <Download size={15} />
-            Download PDF
+            Download invoice / POD PDF
           </Button>
         )}
         {!isDriver && canStart && (
@@ -1229,6 +1794,14 @@ function DeliveryDrawer({
         <span>
           <i className="done" />
           Created <small>{formatDate(delivery.createdAt)}</small>
+        </span>
+        <span>
+          <i className={delivery.startedAt ? "done" : ""} />
+          Started <small>{formatDate(delivery.startedAt)}</small>
+        </span>
+        <span>
+          <i className={delivery.arrivedAt ? "done" : ""} />
+          Arrived <small>{formatDate(delivery.arrivedAt)}</small>
         </span>
         <span>
           <i className={delivery.completedAt ? "done" : ""} />
@@ -1968,12 +2541,65 @@ function DriverView({
   const [rejected, setRejected] = useState("0");
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
+  const [photoMetadata, setPhotoMetadata] = useState<
+    { capturedAt: string; lat?: number; lng?: number; note?: string }[]
+  >([]);
+  const [photoNote, setPhotoNote] = useState("");
+  const [pendingCount, setPendingCount] = useState(0);
+  const [queueMessage, setQueueMessage] = useState("");
+  const [queueSyncing, setQueueSyncing] = useState(false);
+  const [barcode, setBarcode] = useState("");
+  const [cameraScanning, setCameraScanning] = useState(false);
+  const [scanMessage, setScanMessage] = useState("");
+  const [now, setNow] = useState(Date.now());
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const syncQueueRef = useRef<() => void>(() => {});
   const watchRef = useRef<number | null>(null);
   const utils = trpc.useUtils();
   const location = trpc.deliveries.updateLocation.useMutation();
   const statusUpdate = trpc.deliveries.updateStatus.useMutation({
-    onSuccess: () =>
-      toast.success(lang === "UR" ? "ڈیلیوری شروع ہو گئی" : "Delivery started"),
+    onSuccess: result => {
+      toast.success(
+        result?.status === "Arrived"
+          ? lang === "UR"
+            ? "آمد کا وقت محفوظ ہو گیا"
+            : "Arrival time recorded"
+          : lang === "UR"
+            ? "ڈیلیوری شروع ہو گئی"
+            : "Delivery started"
+      );
+      void utils.deliveries.list.invalidate();
+      void utils.dashboard.summary.invalidate();
+    },
+  });
+  const recordBarcode = trpc.deliveries.recordCartonScan.useMutation({
+    onSuccess: result => {
+      if (result.duplicate) {
+        toast.info(
+          lang === "UR"
+            ? "یہ بارکوڈ پہلے اسکین ہو چکا ہے"
+            : "This barcode was already scanned"
+        );
+        return;
+      }
+      if (!active) return;
+      setDelivered(value =>
+        String(
+          Math.min(
+            Math.max(0, active.cartons - (Number(rejected) || 0)),
+            Math.max(Number(value) || 0, result.scannedCount)
+          )
+        )
+      );
+      toast.success(
+        lang === "UR"
+          ? "کارٹن اسکین محفوظ ہو گیا"
+          : `Carton scan ${result.scannedCount} saved`
+      );
+      void utils.deliveries.list.invalidate();
+    },
+    onError: error => toast.error(error.message),
   });
   const proof = trpc.deliveries.submitProof.useMutation({
     onSuccess: () => {
@@ -1997,7 +2623,164 @@ function DriverView({
     setRejected("0");
     setNotes("");
     setPhotos([]);
+    setPhotoMetadata([]);
+    setBarcode("");
+    setScanMessage("");
   }, [active?.id]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    let running = false;
+    const sync = async () => {
+      if (running || !navigator.onLine) return;
+      running = true;
+      setQueueSyncing(true);
+      try {
+        const queued = await listPendingProofs(user.id);
+        if (!disposed) setPendingCount(queued.length);
+        for (const item of queued) {
+          try {
+            await proof.mutateAsync({
+              deliveryId: item.deliveryId,
+              deliveredCartons: item.deliveredCartons,
+              rejectedCartons: item.rejectedCartons,
+              notes: item.notes,
+              photos: item.photos,
+              photoMetadata: item.photoMetadata,
+              submissionId: item.submissionId,
+              expectedUpdatedAt: item.expectedUpdatedAt,
+            });
+            await removePendingProof(item.submissionId);
+            if (!disposed) setPendingCount(count => Math.max(0, count - 1));
+          } catch (error) {
+            const code = (error as any)?.data?.code as string | undefined;
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Queued POD could not sync.";
+            if (!disposed)
+              setQueueMessage(
+                code === "CONFLICT"
+                  ? `POD needs review: ${message}. It remains safely queued.`
+                  : `${message}. The POD remains queued and will not be discarded.`
+              );
+            break;
+          }
+        }
+        const remaining = await listPendingProofs(user.id);
+        if (!disposed) {
+          setPendingCount(remaining.length);
+          if (queued.length > 0 && remaining.length === 0)
+            setQueueMessage("Offline POD synced successfully.");
+        }
+      } catch (error) {
+        if (!disposed)
+          setQueueMessage(
+            error instanceof Error
+              ? error.message
+              : "Offline POD storage is unavailable in this browser."
+          );
+      } finally {
+        running = false;
+        if (!disposed) setQueueSyncing(false);
+      }
+    };
+    syncQueueRef.current = () => void sync();
+    const onOnline = () => void sync();
+    const onOffline = () =>
+      setQueueMessage(
+        "Offline. New POD submissions will be queued on this device."
+      );
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    void sync();
+    return () => {
+      disposed = true;
+      syncQueueRef.current = () => {};
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [user.id]);
+  useEffect(() => {
+    if (!cameraScanning || !active) return;
+    let cancelled = false;
+    let frame = 0;
+    const start = async () => {
+      const Detector = (window as any).BarcodeDetector;
+      if (!Detector) {
+        setScanMessage(
+          "Camera scanning is not supported here; enter or use a USB scanner below."
+        );
+        setCameraScanning(false);
+        return;
+      }
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        setScanMessage("Camera scanning requires HTTPS and camera permission.");
+        setCameraScanning(false);
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      if (cancelled) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      cameraStreamRef.current = stream;
+      const video = videoRef.current;
+      if (!video) return;
+      video.srcObject = stream;
+      await video.play();
+      const detector = new Detector();
+      const scan = async () => {
+        if (cancelled || !videoRef.current) return;
+        try {
+          const results = await detector.detect(videoRef.current);
+          const value = results?.[0]?.rawValue?.trim();
+          if (value) {
+            setCameraScanning(false);
+            submitBarcode(value);
+            return;
+          }
+        } catch {
+          // Camera decode errors are transient; continue scanning.
+        }
+        frame = requestAnimationFrame(() => void scan());
+      };
+      frame = requestAnimationFrame(() => void scan());
+    };
+    void start().catch(error => {
+      setScanMessage(
+        error instanceof Error
+          ? error.message
+          : "Camera could not be opened. Use manual scan."
+      );
+      setCameraScanning(false);
+    });
+    return () => {
+      cancelled = true;
+      if (frame) cancelAnimationFrame(frame);
+      cameraStreamRef.current?.getTracks().forEach(track => track.stop());
+      cameraStreamRef.current = null;
+    };
+  }, [cameraScanning, active?.id]);
+  const submitBarcode = (value: string) => {
+    if (!active) return;
+    const normalized = value.trim();
+    if (!normalized) return;
+    if (normalized.toLowerCase() === active.challan.trim().toLowerCase()) {
+      toast.success(
+        lang === "UR" ? "چالان کی تصدیق ہو گئی" : "Challan barcode confirmed"
+      );
+    } else {
+      recordBarcode.mutate({ deliveryId: active.id, barcode: normalized });
+    }
+    setBarcode("");
+  };
   useEffect(
     () => () => {
       if (watchRef.current !== null)
@@ -2086,15 +2869,62 @@ function DriverView({
       { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
     );
   };
-  const submit = () => {
+  const submit = async () => {
     if (!active) return;
-    proof.mutate({
+    const submission = {
       deliveryId: active.id,
       deliveredCartons: Number(delivered),
       rejectedCartons: Number(rejected),
       notes,
       photos,
-    });
+      photoMetadata,
+      submissionId: crypto.randomUUID(),
+    };
+    if (navigator.onLine) {
+      try {
+        await proof.mutateAsync(submission);
+        return;
+      } catch (error) {
+        const code = (error as any)?.data?.code as string | undefined;
+        if (
+          [
+            "BAD_REQUEST",
+            "FORBIDDEN",
+            "UNAUTHORIZED",
+            "NOT_FOUND",
+            "CONFLICT",
+          ].includes(code ?? "")
+        ) {
+          toast.error(
+            error instanceof Error ? error.message : "POD could not be saved."
+          );
+          return;
+        }
+      }
+    }
+    try {
+      await savePendingProof({
+        ...submission,
+        userId: user.id,
+        expectedUpdatedAt: active.updatedAt,
+        queuedAt: new Date().toISOString(),
+      });
+      const queued = await listPendingProofs(user.id);
+      setPendingCount(queued.length);
+      setQueueMessage(
+        navigator.onLine
+          ? "Network did not confirm the save. POD is queued safely; tap Sync pending when ready."
+          : "Offline. POD is queued on this device and will sync after reconnecting."
+      );
+      toast.info("POD safely queued on this device.");
+      if (navigator.onLine) syncQueueRef.current();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not store POD offline. Keep this screen open and retry."
+      );
+    }
   };
   return (
     <div className={`driver-screen ${lang === "UR" ? "rtl" : ""}`}>
@@ -2128,6 +2958,30 @@ function DriverView({
               {lang === "UR" ? "ڈیلیوری شروع کریں" : "Start delivery"}
             </Button>
           )}
+          {active?.status === "Out for Delivery" && (
+            <Button
+              variant="secondary"
+              onClick={() =>
+                statusUpdate.mutate({
+                  deliveryId: active.id,
+                  status: "Arrived",
+                })
+              }
+            >
+              <MapPin size={16} />
+              {lang === "UR" ? "مقام پر پہنچ گئے" : "Mark arrived"}
+            </Button>
+          )}
+          {pendingCount > 0 && (
+            <Button
+              variant="secondary"
+              disabled={!navigator.onLine || queueSyncing}
+              onClick={() => syncQueueRef.current()}
+            >
+              <RefreshCw size={16} />
+              {queueSyncing ? "Syncing…" : `Sync pending (${pendingCount})`}
+            </Button>
+          )}
           <Button
             variant={tracking ? "danger" : "secondary"}
             onClick={toggleTracking}
@@ -2143,6 +2997,11 @@ function DriverView({
           </Button>
         </div>
       </div>
+      {queueMessage && (
+        <p role="status" className="signature-note">
+          {queueMessage}
+        </p>
+      )}
       {active ? (
         <>
           <div className="driver-active">
@@ -2156,6 +3015,42 @@ function DriverView({
                 <MapPin size={15} />
                 {active.address}
               </p>
+              <div className="driver-timer-strip">
+                {active.startedAt && (
+                  <span>
+                    <Clock3 size={14} />
+                    Trip elapsed ·{" "}
+                    {Math.max(
+                      0,
+                      Math.round(
+                        ((active.completedAt
+                          ? new Date(active.completedAt).getTime()
+                          : now) -
+                          new Date(active.startedAt).getTime()) /
+                          60000
+                      )
+                    )}{" "}
+                    min
+                  </span>
+                )}
+                {active.arrivedAt && (
+                  <span>
+                    <Clock3 size={14} />
+                    At stop ·{" "}
+                    {Math.max(
+                      0,
+                      Math.round(
+                        ((active.completedAt
+                          ? new Date(active.completedAt).getTime()
+                          : now) -
+                          new Date(active.arrivedAt).getTime()) /
+                          60000
+                      )
+                    )}{" "}
+                    min
+                  </span>
+                )}
+              </div>
             </div>
             <span className="mono">{active.id}</span>
           </div>
@@ -2191,6 +3086,58 @@ function DriverView({
                   />
                 </Field>
               </div>
+              <section className="barcode-scan-panel">
+                <div>
+                  <b>
+                    {lang === "UR"
+                      ? "چالان / کارٹن بارکوڈ"
+                      : "Challan / carton barcode"}
+                  </b>
+                  <small>
+                    {lang === "UR"
+                      ? "منفرد اسکین شدہ کارٹن"
+                      : `Unique carton scans · ${active.scannedBarcodes?.length ?? 0} / ${active.cartons}`}
+                  </small>
+                </div>
+                <div className="barcode-scan-controls">
+                  <input
+                    value={barcode}
+                    onChange={event => setBarcode(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        submitBarcode(barcode);
+                      }
+                    }}
+                    placeholder={
+                      lang === "UR"
+                        ? "بارکوڈ اسکین کریں یا درج کریں"
+                        : "Scan or enter barcode; USB scanners work too"
+                    }
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setScanMessage("");
+                      setCameraScanning(value => !value);
+                    }}
+                  >
+                    <ScanLine size={15} />
+                    {cameraScanning ? "Stop camera" : "Scan with camera"}
+                  </Button>
+                </div>
+                {cameraScanning && (
+                  <video
+                    ref={videoRef}
+                    className="barcode-camera"
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+                )}
+                {scanMessage && <small role="status">{scanMessage}</small>}
+              </section>
               <Field
                 label={
                   lang === "UR"
@@ -2230,11 +3177,29 @@ function DriverView({
                         files.map(compressPhoto)
                       );
                       setPhotos(current => [...current, ...converted]);
+                      const capturedAt = new Date().toISOString();
+                      setPhotoMetadata(current => [
+                        ...current,
+                        ...converted.map(() => ({
+                          capturedAt,
+                          ...(gps ? { lat: gps.lat, lng: gps.lng } : {}),
+                          ...(photoNote ? { note: photoNote } : {}),
+                        })),
+                      ]);
                     } catch {
                       toast.error(ui[lang].photoTooLarge);
                     }
                     e.currentTarget.value = "";
                   }}
+                />
+                <input
+                  value={photoNote}
+                  onChange={e => setPhotoNote(e.target.value)}
+                  placeholder={
+                    lang === "UR"
+                      ? "تصویر کا نوٹ"
+                      : "Photo note (applies to next captures)"
+                  }
                 />
                 <small>
                   {lang === "UR"
@@ -2252,15 +3217,28 @@ function DriverView({
                           src={photo}
                           alt={`${lang === "UR" ? "ثبوت کی تصویر" : "Proof photo"} ${index + 1}`}
                         />
+                        <small>
+                          {formatDate(photoMetadata[index]?.capturedAt)}
+                          {photoMetadata[index]?.lat != null &&
+                          photoMetadata[index]?.lng != null
+                            ? ` · ${photoMetadata[index]?.lat?.toFixed(5)}, ${photoMetadata[index]?.lng?.toFixed(5)}`
+                            : " · GPS not captured"}
+                          {photoMetadata[index]?.note
+                            ? ` · ${photoMetadata[index]?.note}`
+                            : ""}
+                        </small>
                         <button
                           type="button"
                           className="button ghost"
                           aria-label={`${ui[lang].removePhoto} ${index + 1}`}
-                          onClick={() =>
+                          onClick={() => {
                             setPhotos(items =>
                               items.filter((_, i) => i !== index)
-                            )
-                          }
+                            );
+                            setPhotoMetadata(items =>
+                              items.filter((_, i) => i !== index)
+                            );
+                          }}
                         >
                           {ui[lang].removePhoto}
                         </button>
@@ -2480,7 +3458,16 @@ function Modal({
 }
 
 export default function Home() {
+  const trackToken = window.location.pathname.match(/^\/track\/([^/]+)$/)?.[1];
   const me = trpc.auth.me.useQuery();
+  const notificationsQuery = trpc.notifications.list.useQuery(undefined, {
+    enabled: !trackToken,
+    refetchInterval: 30000,
+  });
+  const markNotification = trpc.notifications.markRead.useMutation({
+    onSuccess: () => void notificationsQuery.refetch(),
+  });
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const utils = trpc.useUtils();
   const [view, setView] = useState<ViewKey>(() =>
     window.location.pathname === "/driver"
@@ -2515,6 +3502,8 @@ export default function Home() {
       next === "overview" ? "/" : `/${next}`
     );
   };
+  if (trackToken)
+    return <PublicTracking token={decodeURIComponent(trackToken)} />;
   if (me.isLoading) return <Loading />;
   if (!user)
     return <AuthScreen lang={lang} onComplete={() => void me.refetch()} />;
@@ -2649,6 +3638,49 @@ export default function Home() {
             >
               {lang === "EN" ? "اردو" : "EN"}
             </button>
+            <div className="notification-wrap">
+              <button
+                className="icon-button notification-button"
+                aria-label="Notifications"
+                onClick={() => setNotificationsOpen(v => !v)}
+              >
+                <Bell size={18} />
+                {(notificationsQuery.data ?? []).filter((n: any) => !n.readAt)
+                  .length > 0 && (
+                  <i>
+                    {
+                      (notificationsQuery.data ?? []).filter(
+                        (n: any) => !n.readAt
+                      ).length
+                    }
+                  </i>
+                )}
+              </button>
+              {notificationsOpen && (
+                <div className="notification-popover">
+                  <b>Notifications</b>
+                  {(notificationsQuery.data ?? []).length ? (
+                    (notificationsQuery.data ?? []).map((n: any) => (
+                      <button
+                        key={n.id}
+                        className={n.readAt ? "read" : "unread"}
+                        onClick={() =>
+                          !n.readAt &&
+                          markNotification.mutate({ notificationId: n.id })
+                        }
+                      >
+                        <span>{n.message ?? n.title ?? "Delivery update"}</span>
+                        <small>
+                          {n.createdAt ? formatDate(n.createdAt) : ""}
+                        </small>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="muted">No notifications.</p>
+                  )}
+                </div>
+              )}
+            </div>
             <span className="role-chip">
               <CircleUserRound size={14} />
               {user.role}

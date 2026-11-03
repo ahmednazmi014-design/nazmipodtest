@@ -2,37 +2,49 @@
 
 ## Product intent
 
-NAZMI POD is a secure, full-stack delivery operations system for Nazmi Packaging Company (Pvt.) Ltd. It gives the Owner a clear operational cockpit, gives riders a simple bilingual mobile workflow, and creates an accountable digital proof of carton handover with timestamps, optional photos, GPS, audit history, and downloadable PDF evidence. Customer signature is not required.
+NAZMI POD is a secure, full-stack delivery operations system for Nazmi Packaging Company (Pvt.) Ltd. It gives dispatch a clear operational cockpit, gives riders a simple bilingual mobile workflow, and creates accountable proof of carton handover with timestamps, photos, GPS, audit history, and downloadable invoice/POD PDFs. Customer signature is not required.
 
-## Delivered implementation
+## Current implementation and constraints
 
-The application starts with an empty operational store. The first person creates the Owner account with a password; the Owner then creates staff accounts and adds the company’s real delivery data. Nothing is seeded, hardcoded, or labelled as a sample record. The current server store is an atomic JSON file so the app works immediately on Render without another service; `NAZMI_DATA_FILE` or `NAZMI_DATA_DIR` controls its location. A Render persistent disk or managed database should be configured before scaling beyond one service instance.
+The application starts with an empty operational store. A private deployment bootstrap creates the Ahmed / Ahsan Ahmed Owner account and forces a password change at first sign-in; public Owner sign-up is disabled. The current runtime store is an atomic JSON file controlled by `NAZMI_DATA_FILE` or `NAZMI_DATA_DIR`. Render has no persistent disk attached, so redeploys or restarts may reset users and delivery records. Develop on `feature/invoice-calendar-bulk`; do not deploy or merge to production until durable storage is configured and the user authorizes release.
 
-The frontend is React, TypeScript, Wouter, Lucide, and responsive CSS. The backend is Express and tRPC with Zod validation, password hashing, httpOnly session cookies, server-side permission checks, atomic writes, immutable audit entries, PDF generation, and protected tracker endpoints. The existing Drizzle schema remains available for a future managed relational migration, while the delivered runtime path is intentionally self-contained.
+The frontend is React, TypeScript, Wouter, Lucide, and responsive CSS. The backend is Express and tRPC with Zod validation, password hashing, httpOnly session cookies, server-side permissions, atomic writes, audit entries, custom PDF generation, and protected tracker endpoints. Existing Drizzle schema remains available for a later managed database migration.
 
-## Core workflow
+## Approved feature scope
 
-An Owner or authorized dispatch user creates a delivery with customer, destination, address, contact, challan, reference, product, carton quantity, scheduled time, driver, vehicle, route, and notes. Every record receives a unique `NAZ-POD-YYYY-####` ID and duplicate challans are blocked. The lifecycle is Scheduled or Assigned → Out for Delivery → Arrived → Delivered or Partially Delivered, with Failed and Cancelled exceptions. The Owner and supervisors can review records and status history; riders can only see their own assignments.
+1. Show driver and vehicle scheduling conflicts before dispatch; use a known duration window and do not silently double-book.
+2. Support recurring delivery schedules with explicitly distinct generated delivery instances and challan handling.
+3. Create a linked follow-up delivery for cartons not delivered; require a distinct challan and retain the original-delivery relationship.
+4. Notify authorized staff in the app when POD is submitted, approved, or returned for correction; no external messaging provider is assumed.
+5. Queue driver work offline in IndexedDB and sync after reconnect, with stable submission IDs and conflict visibility rather than silent overwrite.
+6. Scan challan/carton barcodes using camera capability where supported and provide manual fallback.
+7. Store multiple compressed POD photos with capture time, optional GPS, and a short note.
+8. Record rider start, arrival, and completion timestamps and calculate elapsed/at-stop durations.
+9. Provide a read-only customer tracking page through high-entropy, expiring, revocable tokens. Store only token hashes. Return only approved status, schedule, delivered quantity, and limited live location while en route; never expose contact information or driver identity.
+10. Add a delivery calendar and an atomic, validated CSV bulk-import flow with a preview and a 200-row maximum.
+11. Redesign the invoice/POD PDF. Optional unit price and tax fields calculate totals only when supplied; use the configured company currency.
 
-A rider can start the delivery, request fresh high-accuracy browser GPS, record delivered and rejected cartons, choose camera photos, add a note, and end the delivery by submitting POD. The server stores the evidence, timestamp, location trail, and delivery status. Supervisors can verify or flag POD. Authorized users can download a one-page PDF, and the live tracker endpoint returns the latest location and trail.
+## Behavior and safety decisions
+
+Scheduling must reject invalid or overlapping assignments for the same active driver or vehicle and explain the conflicting delivery. Recurring schedules create dated instances with distinct identifiers; the external challan must never be silently rewritten. Partial-delivery follow-ups retain the parent link and use their own challan. Notifications are in-app only. Offline retries must be idempotent; if the saved delivery changed on the server, preserve the pending proof and require resolution. Tracking links expire after seven days, can be revoked/regenerated by authorized staff, and the public page is no-index. Photos remain compressed and bounded to protect server request/storage limits.
 
 ## Design direction
 
-The chosen style is **Quiet Industrial Ledger**: a restrained enterprise workspace with warm paper-white surfaces, a deep emerald operational signal, compact tables, and evidence-first status chips. The interface uses a persistent desktop rail, responsive mobile cards, crisp uppercase micro-labels, strong numeric hierarchy, and minimal motion. Amber and coral are reserved for attention and exceptions. Urdu mode uses a true RTL layout, not just translated labels.
+Continue the established **Quiet Industrial Ledger** style: warm paper-white surfaces, deep emerald operational signals, compact tables, evidence-first status chips, and minimal motion. Keep the persistent desktop rail and responsive mobile cards. Amber and coral are reserved for attention and exceptions. Urdu mode uses true RTL layout.
 
 ## Project structure
 
-- `client/src/App.tsx`: application shell and auth gate.
-- `client/src/pages/Home.tsx`: sign-in/setup, dashboard, deliveries, staff, POD, tracker, settings, audit, and rider workspace.
+- `client/src/App.tsx`: app shell and route selection.
+- `client/src/pages/Home.tsx`: authenticated dashboard, deliveries, calendar/import, staff, POD, tracker, settings, audit, notifications, and rider workspace.
+- `client/src/pages/PublicTracking.tsx`: isolated, token-only customer tracking page.
 - `client/src/index.css`: responsive Quiet Industrial Ledger visual system.
-- `server/store.ts`: password hashing, session store, JSON persistence, delivery/staff/GPS/POD/audit types and atomic writes.
-- `server/routers.ts`: typed auth, staff, deliveries, dashboard, settings, tracker, and audit procedures.
-- `server/pdf.ts`: authenticated one-page POD PDF creation.
-- `server/_core/context.ts`: request session resolution and cookie options.
-- `server/_core/index.ts`: Express, tRPC, health, PDF, and tracker endpoints.
+- `server/store.ts`: backward-compatible JSON defaults and delivery/photo/notification/tracking types.
+- `server/routers.ts`: typed auth, staff, delivery scheduling, import, notifications, barcode/offline, and public-tracking procedures.
+- `server/pdf.ts`: invoice/POD PDF generation with optional financial totals and evidence photos.
+- `server/_core/index.ts`: Express, tRPC, health, PDF, protected and customer-tracking endpoints.
 - `drizzle/`: relational schema retained for a future managed database migration.
 - `public/manus-routes.json`: synchronized page route manifest.
 
-## Material constraints
+## Validation and release
 
-The official logo and full company contact details were not provided, so the current mark is an editable NAZMI POD wordmark and blank contact fields remain blank until the Owner enters them. Email, SMS, WhatsApp, customer portal, offline sync, and managed database migration remain future extensions because credentials and operational policy were not provided. Browser GPS remains permission-based. Rider evidence is carton counts, optional photos, notes, timestamp, rider/vehicle context, and optional location.
+Use existing TypeScript, Vitest, and production-build checks. Add focused tests for conflict detection, atomic import, follow-up links, status notifications, offline idempotency, tracking-token expiry/privacy/revocation, photo metadata, and PDF totals. Run a read-only validation review against this plan and `TODO.md`. Do not write test fixtures to production data. Keep the changes on the feature branch until the user approves a durable-storage and production-release plan.

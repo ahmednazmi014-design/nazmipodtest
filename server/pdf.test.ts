@@ -36,7 +36,9 @@ const delivery = (photos: string[]): StoredDelivery => ({
   completedAt: "2026-11-02",
   verifiedAt: null,
 });
-const store = { settings: { companyName: "Test Company" } } as Store;
+const store = {
+  settings: { companyName: "Test Company", currency: "PKR" },
+} as Store;
 
 function pdfFor(photos: string[]) {
   return createPodPdf(delivery(photos), undefined, store);
@@ -76,5 +78,39 @@ describe("createPodPdf photos", () => {
     const text = pdf.toString("latin1");
     expect((text.match(/\/Subtype \/Image/g) ?? []).length).toBe(3);
     expect((text.match(/\/Type \/Page\b/g) ?? []).length).toBe(4);
+  });
+});
+
+describe("invoice and photo metadata", () => {
+  it("prints a transparent unit-price, subtotal, tax and total breakdown", () => {
+    const priced = {
+      ...delivery([]),
+      unitPrice: 125,
+      taxPercent: 5,
+    };
+    const pdf = createPodPdf(priced, undefined, store);
+    const text = pdf.toString("latin1");
+    expect(text).toContain("Unit rate: PKR 125.00 per carton");
+    expect(text).toContain("Subtotal: PKR 1500.00");
+    expect(text).toContain("Tax \\(5%\\): PKR 75.00");
+    expect(text).toContain("Total: PKR 1575.00");
+  });
+
+  it("prints capture time, GPS and note alongside embedded photo evidence", () => {
+    const proof = {
+      ...delivery([PHOTO]),
+      photoMetadata: [
+        {
+          capturedAt: "2026-11-02T14:35:00.000Z",
+          lat: 24.86,
+          lng: 67.001,
+          note: "Gate handover",
+        },
+      ],
+    };
+    const text = createPodPdf(proof, undefined, store).toString("latin1");
+    expect(text).toContain("Captured: 2026-11-02T14:35:00.000Z");
+    expect(text).toContain("24.860000, 67.001000");
+    expect(text).toContain("Note: Gate handover");
   });
 });

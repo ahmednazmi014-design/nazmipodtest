@@ -92,86 +92,155 @@ export function createPodPdf(
   store: Store
 ): Buffer {
   const lines = [
-    store.settings.companyName || "Nazmi Packaging Company (Pvt.) Ltd.",
-    "PROOF OF DELIVERY / CARTON HANDOVER",
-    "",
+    "BILL TO",
     `Delivery ID: ${delivery.id}`,
     `Customer: ${delivery.customer}`,
     `Address: ${delivery.address}`,
     `Contact: ${delivery.contact || "Not provided"}`,
-    `Challan: ${delivery.challan}`,
+    "DELIVERY DETAILS",
+    `Invoice / challan: ${delivery.challan}`,
+    `Invoice date: ${delivery.createdAt}`,
     `Order / reference: ${delivery.reference || "Not provided"}`,
+    `Scheduled: ${delivery.scheduledAt}`,
     `Product: ${delivery.product || "Not provided"}`,
-    "",
+    "CARTON SUMMARY",
     `Dispatched cartons: ${delivery.cartons}`,
     `Delivered cartons: ${delivery.deliveredCartons}`,
     `Rejected / damaged cartons: ${delivery.rejectedCartons}`,
+    "INVOICE TOTALS",
+    ...(delivery.unitPrice != null
+      ? [
+          `Unit rate: ${store.settings.currency} ${delivery.unitPrice.toFixed(2)} per carton`,
+          `Subtotal: ${store.settings.currency} ${(delivery.unitPrice * delivery.cartons).toFixed(2)}`,
+          ...(delivery.taxPercent != null
+            ? [
+                `Tax (${delivery.taxPercent}%): ${store.settings.currency} ${((delivery.unitPrice * delivery.cartons * delivery.taxPercent) / 100).toFixed(2)}`,
+              ]
+            : []),
+          `Total: ${store.settings.currency} ${(delivery.unitPrice * delivery.cartons * (1 + (delivery.taxPercent ?? 0) / 100)).toFixed(2)}`,
+        ]
+      : ["Pricing not entered; no financial total calculated."]),
+    "DELIVERY EVIDENCE",
     `Status: ${delivery.status}`,
     `Proof status: ${delivery.proofStatus}`,
     `Driver: ${driver?.name || "Unassigned"}`,
     `Vehicle: ${delivery.vehicle || "Not provided"}`,
-    `Scheduled: ${delivery.scheduledAt}`,
+    `Started: ${delivery.startedAt || "Not recorded"}`,
+    `Arrived: ${delivery.arrivedAt || "Not recorded"}`,
     `Completed: ${delivery.completedAt || "Not completed"}`,
-    `GPS: ${delivery.gps ? `${delivery.gps.lat.toFixed(6)}, ${delivery.gps.lng.toFixed(6)} (accuracy ${delivery.gps.accuracy ?? "n/a"}m)` : "Not captured"}`,
+    `Last GPS: ${delivery.gps ? `${delivery.gps.lat.toFixed(6)}, ${delivery.gps.lng.toFixed(6)} (accuracy ${delivery.gps.accuracy ?? "n/a"}m)` : "Not captured"}`,
     `Verification code: ${delivery.id}-${delivery.updatedAt.slice(0, 10)}`,
-    "",
-    "Remarks:",
+    "REMARKS",
     ...wrap(delivery.proofNotes || delivery.notes || "No remarks recorded."),
-    "",
     "This digital record confirms carton handover. Customer signature is not required.",
   ];
 
   const pages: {
     commands: string[];
     image?: { bytes: Buffer; width: number; height: number };
-  }[] = [{ commands: [] }];
-  let y = PAGE_HEIGHT - MARGIN;
+  }[] = [
+    {
+      commands: [
+        `q 0.035 0.20 0.15 rg 0 ${PAGE_HEIGHT - 82} ${PAGE_WIDTH} 82 re f Q`,
+        `1 1 1 rg BT /F2 18 Tf ${MARGIN} ${PAGE_HEIGHT - 34} Td (${escapePdfText(store.settings.companyName || "Nazmi Packaging Company (Pvt.) Ltd.")}) Tj ET`,
+        `1 1 1 rg BT /F1 10 Tf ${MARGIN} ${PAGE_HEIGHT - 56} Td (INVOICE / PROOF OF DELIVERY / CARTON HANDOVER) Tj ET`,
+        `1 1 1 rg BT /F2 9 Tf ${PAGE_WIDTH - MARGIN - 88} ${PAGE_HEIGHT - 34} Td (NAZMI POD) Tj ET`,
+      ],
+    },
+  ];
+  let y = PAGE_HEIGHT - MARGIN - 96;
   const addPage = () => {
     pages.push({ commands: [] });
     y = PAGE_HEIGHT - MARGIN;
   };
-  lines.forEach((line, index) => {
-    const isTitle = index === 0;
-    const isHeading = index === 1;
-    const size = isTitle ? 18 : isHeading ? 14 : 11;
-    const gap = line ? size + 7 : 3;
-    if (y - gap < MARGIN) addPage();
-    if (line) {
-      const font = isTitle || isHeading ? "F2" : "F1";
-      pages
-        .at(-1)!
-        .commands.push(
-          `BT /${font} ${size} Tf ${MARGIN} ${y - size} Td (${escapePdfText(line)}) Tj ET`
+  const sectionTitles = new Set([
+    "BILL TO",
+    "DELIVERY DETAILS",
+    "CARTON SUMMARY",
+    "INVOICE TOTALS",
+    "DELIVERY EVIDENCE",
+    "REMARKS",
+  ]);
+  lines
+    .flatMap(line => (line ? wrap(line, 88) : [""]))
+    .forEach(line => {
+      const isSection = sectionTitles.has(line);
+      const size = isSection ? 10 : 10;
+      const gap = line ? (isSection ? 23 : 16) : 5;
+      if (y - gap < MARGIN) addPage();
+      if (line) {
+        const page = pages.at(-1)!;
+        if (isSection)
+          page.commands.push(
+            `q 0.89 0.95 0.92 rg ${MARGIN - 5} ${y - 16} ${PAGE_WIDTH - MARGIN * 2 + 10} 18 re f Q`
+          );
+        page.commands.push(
+          `${isSection ? "0.04 0.32 0.23 rg" : "0.10 0.15 0.14 rg"} BT /${isSection ? "F2" : "F1"} ${size} Tf ${MARGIN} ${y - size} Td (${escapePdfText(line)}) Tj ET`
         );
-    }
-    y -= gap;
-  });
+      }
+      y -= gap;
+    });
 
-  const photos: { bytes: Buffer; width: number; height: number }[] = [];
-  for (const value of Array.isArray(delivery.photos) ? delivery.photos : []) {
+  const photos: {
+    bytes: Buffer;
+    width: number;
+    height: number;
+    metadata?: {
+      capturedAt: string;
+      lat?: number | null;
+      lng?: number | null;
+      note?: string;
+    };
+  }[] = [];
+  for (const [index, value] of (Array.isArray(delivery.photos)
+    ? delivery.photos
+    : []
+  ).entries()) {
     if (photos.length >= MAX_PHOTOS) break;
     const bytes = safeJpegBytes(value);
     if (!bytes) continue;
     const dimensions = jpegDimensions(bytes);
-    if (dimensions) photos.push({ bytes, ...dimensions });
+    if (dimensions)
+      photos.push({
+        bytes,
+        ...dimensions,
+        metadata: delivery.photoMetadata?.[index],
+      });
   }
-  for (const image of photos) {
+  for (const [index, image] of photos.entries()) {
+    addPage();
+    const meta = image.metadata;
+    const metaLines = [
+      `Photo ${index + 1} of ${photos.length} · Captured: ${meta?.capturedAt || "Not recorded"}`,
+      `GPS: ${meta?.lat != null && meta?.lng != null ? `${meta.lat.toFixed(6)}, ${meta.lng.toFixed(6)}` : "Not captured"}`,
+      ...(meta?.note ? wrap(`Note: ${meta.note}`, 88).slice(0, 2) : []),
+    ];
+    pages
+      .at(-1)!
+      .commands.push(
+        `0.035 0.20 0.15 rg BT /F2 14 Tf ${MARGIN} ${PAGE_HEIGHT - MARGIN} Td (POD PHOTO EVIDENCE) Tj ET`,
+        `0.10 0.15 0.14 rg BT /F1 9 Tf ${MARGIN} ${PAGE_HEIGHT - MARGIN - 20} Td (${escapePdfText(metaLines[0])}) Tj ET`,
+        `0.10 0.15 0.14 rg BT /F1 9 Tf ${MARGIN} ${PAGE_HEIGHT - MARGIN - 34} Td (${escapePdfText(metaLines[1])}) Tj ET`
+      );
+    if (metaLines[2])
+      pages
+        .at(-1)!
+        .commands.push(
+          `0.10 0.15 0.14 rg BT /F1 9 Tf ${MARGIN} ${PAGE_HEIGHT - MARGIN - 48} Td (${escapePdfText(metaLines[2])}) Tj ET`
+        );
+    const captionHeight = metaLines.length > 2 ? 60 : 46;
     const scale = Math.min(
       (PAGE_WIDTH - MARGIN * 2) / image.width,
-      (PAGE_HEIGHT - MARGIN * 2) / image.height,
+      (PAGE_HEIGHT - MARGIN * 2 - captionHeight) / image.height,
       1
     );
     const width = image.width * scale;
     const height = image.height * scale;
-    // Give each image its own page so every page has a single unambiguous XObject.
-    addPage();
-    y -= height;
     const page = pages.at(-1)!;
     page.image = image;
     page.commands.push(
-      `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${((PAGE_WIDTH - width) / 2).toFixed(2)} ${y.toFixed(2)} cm /Im${pages.length} Do Q`
+      `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${((PAGE_WIDTH - width) / 2).toFixed(2)} ${MARGIN.toFixed(2)} cm /Im${pages.length} Do Q`
     );
-    y -= 20;
   }
 
   const objects: PdfObject[] = [];

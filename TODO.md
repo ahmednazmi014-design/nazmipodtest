@@ -7,6 +7,15 @@
 - [x] Dispatch can optimize 1–23 selected Karachi stops for a driving loop, assign the suggested order to an active Driver, and open the route in Google Maps.
 - [ ] Add calendar scheduling, vehicle availability checks, rescheduling reasons, and linked follow-up deliveries for partial quantities.
 
+## Requested next additions
+
+- [ ] Add a monthly delivery calendar, validated bulk delivery CSV import, and a professional invoice/POD PDF with optional per-carton price and tax so totals are only calculated from supplied values.
+- [ ] Check overlapping driver/vehicle bookings before scheduling; support recurring delivery schedules with distinct challan identifiers and follow-up deliveries for undelivered quantities.
+- [ ] Notify authorized staff in-app when POD is submitted, approved, or sent back for correction.
+- [ ] Queue driver proof safely while offline and sync without duplicate submissions after reconnecting; support barcode scanning with a manual fallback.
+- [ ] Attach multiple delivery photos with capture time, GPS, and notes; record rider start, arrival, and completion times and calculate time at each stop.
+- [ ] Provide an expiring, revocable, token-protected public customer tracking page that reveals only approved delivery status and live location while in transit.
+
 ## Proof of delivery
 
 - [x] Driver workflow stays simple: open the assigned delivery, see customer/address/challan/cartons, enter delivered cartons, optionally enter rejected/damaged cartons and a short note, optionally select proof photos, request GPS, and tap End delivery & submit POD. No customer signature is required.

@@ -83,6 +83,21 @@ export type StoredDelivery = {
   updatedAt: string;
   completedAt: string | null;
   verifiedAt: string | null;
+  unitPrice?: number | null;
+  taxPercent?: number | null;
+  expectedDurationMinutes?: number;
+  startedAt?: string | null;
+  arrivedAt?: string | null;
+  parentDeliveryId?: string | null;
+  recurrenceGroupId?: string | null;
+  scannedBarcodes?: string[];
+  photoMetadata?: {
+    capturedAt: string;
+    lat?: number;
+    lng?: number;
+    note?: string;
+  }[];
+  proofSubmissionIds?: string[];
 };
 
 export type AuditEntry = {
@@ -106,6 +121,21 @@ export type Store = {
   }[];
   deliveries: StoredDelivery[];
   audit: AuditEntry[];
+  notifications?: {
+    id: string;
+    userId: string;
+    deliveryId: string;
+    type: string;
+    message: string;
+    createdAt: string;
+    readAt: string | null;
+  }[];
+  trackingTokens?: {
+    hash: string;
+    deliveryId: string;
+    expiresAt: string;
+    revokedAt: string | null;
+  }[];
   settings: {
     companyName: string;
     address: string;
@@ -130,6 +160,8 @@ const blankStore = (): Store => ({
   sessions: [],
   deliveries: [],
   audit: [],
+  notifications: [],
+  trackingTokens: [],
   settings: {
     companyName: "Nazmi Packaging Company (Pvt.) Ltd.",
     address: "",
@@ -153,6 +185,21 @@ export function readStore(): Store {
     return {
       ...blankStore(),
       ...parsed,
+      notifications: parsed.notifications ?? [],
+      trackingTokens: parsed.trackingTokens ?? [],
+      deliveries: (parsed.deliveries ?? []).map(delivery => ({
+        ...delivery,
+        photos: delivery.photos ?? [],
+        gpsTrail: delivery.gpsTrail ?? [],
+        deliveredCartons: delivery.deliveredCartons ?? 0,
+        rejectedCartons: delivery.rejectedCartons ?? 0,
+        scannedBarcodes: delivery.scannedBarcodes ?? [],
+        photoMetadata: delivery.photoMetadata ?? [],
+        proofSubmissionIds: delivery.proofSubmissionIds ?? [],
+        startedAt: delivery.startedAt ?? null,
+        arrivedAt: delivery.arrivedAt ?? null,
+        parentDeliveryId: delivery.parentDeliveryId ?? null,
+      })),
       users: (parsed.users ?? []).map(user => ({
         ...user,
         username: user.username ?? "",

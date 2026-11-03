@@ -7,6 +7,7 @@
     { "path": "/tracker", "title": "Live rider tracker" },
     { "path": "/driver", "title": "Rider workspace" },
     { "path": "/settings", "title": "Company settings" },
-    { "path": "/audit", "title": "Audit log" }
+    { "path": "/audit", "title": "Audit log" },
+    { "path": "/track/:token", "title": "Secure delivery tracking" }
   ]
 }
