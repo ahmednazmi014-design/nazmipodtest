@@ -129,7 +129,12 @@ export function createPodPdf(
     `Arrived: ${delivery.arrivedAt || "Not recorded"}`,
     `Completed: ${delivery.completedAt || "Not completed"}`,
     `Last GPS: ${delivery.gps ? `${delivery.gps.lat.toFixed(6)}, ${delivery.gps.lng.toFixed(6)} (accuracy ${delivery.gps.accuracy ?? "n/a"}m)` : "Not captured"}`,
+    `GPS trail points: ${delivery.gpsTrail.length}`,
+    "HANDOVER RESULT",
+    `Completion: ${delivery.cartons ? Math.round((delivery.deliveredCartons / delivery.cartons) * 100) : 0}% (${delivery.deliveredCartons} of ${delivery.cartons} cartons)`,
+    `Customer acknowledgement: ${delivery.deliveredCartons > 0 ? "Recorded through POD submission" : "Not recorded"}`,
     `Verification code: ${delivery.id}-${delivery.updatedAt.slice(0, 10)}`,
+    `Verified at: ${delivery.verifiedAt || "Pending supervisor verification"}`,
     "REMARKS",
     ...wrap(delivery.proofNotes || delivery.notes || "No remarks recorded."),
     "This digital record confirms carton handover. Customer signature is not required.",
@@ -159,6 +164,7 @@ export function createPodPdf(
     "CARTON SUMMARY",
     "INVOICE TOTALS",
     "DELIVERY EVIDENCE",
+    "HANDOVER RESULT",
     "REMARKS",
   ]);
   lines
@@ -242,6 +248,14 @@ export function createPodPdf(
       `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${((PAGE_WIDTH - width) / 2).toFixed(2)} ${MARGIN.toFixed(2)} cm /Im${pages.length} Do Q`
     );
   }
+
+  pages.forEach((page, index) => {
+    page.commands.push(
+      `0.82 0.89 0.85 RG 1 w ${MARGIN} 34 m ${PAGE_WIDTH - MARGIN} 34 l S`,
+      `0.35 0.43 0.39 rg BT /F1 8 Tf ${MARGIN} 20 Td (${escapePdfText(store.settings.companyName || "Nazmi Packaging")}) Tj ET`,
+      `0.35 0.43 0.39 rg BT /F1 8 Tf ${PAGE_WIDTH - MARGIN - 72} 20 Td (Page ${index + 1} of ${pages.length}) Tj ET`
+    );
+  });
 
   const objects: PdfObject[] = [];
   const addObject = (body: Buffer | string) => {

@@ -8,6 +8,8 @@
     { "path": "/driver", "title": "Rider workspace" },
     { "path": "/driver-preview", "title": "Try as Driver" },
     { "path": "/operations", "title": "Operations Center" },
+    { "path": "/reports", "title": "Reports and exports" },
+    { "path": "/fleet", "title": "Fleet and riders" },
     { "path": "/settings", "title": "Company settings" },
     { "path": "/audit", "title": "Audit log" },
     { "path": "/customer-tracking", "title": "Customer tracking portal" },

@@ -84,6 +84,8 @@ type ViewKey =
   | "driver"
   | "driver-preview"
   | "operations"
+  | "reports"
+  | "fleet"
   | "settings"
   | "audit";
 type User = {
@@ -161,6 +163,8 @@ const ui = {
     driver: "My route",
     driverPreview: "Try as Driver",
     operations: "Operations center",
+    reports: "Reports & exports",
+    fleet: "Fleet & riders",
     signOut: "Sign out",
     newDelivery: "New delivery",
     search: "Search deliveries",
@@ -236,6 +240,8 @@ const ui = {
     driver: "میرا روٹ",
     driverPreview: "ڈرائیور پیش نظارہ",
     operations: "آپریشنز سینٹر",
+    reports: "رپورٹس اور ایکسپورٹس",
+    fleet: "فلیٹ اور رائیڈرز",
     signOut: "سائن آؤٹ",
     newDelivery: "نئی ڈیلیوری",
     search: "ڈیلیوری تلاش کریں",
@@ -638,7 +644,8 @@ function Dashboard({
     ? Math.round((summary.deliveredCartons / summary.cartons) * 100)
     : 0;
   const unassigned = deliveries.filter(
-    delivery => !delivery.driver && !["Delivered", "Cancelled"].includes(delivery.status)
+    delivery =>
+      !delivery.driver && !["Delivered", "Cancelled"].includes(delivery.status)
   ).length;
   const attention = deliveries.filter(delivery =>
     ["Failed", "Partially Delivered"].includes(delivery.status)
@@ -711,13 +718,33 @@ function Dashboard({
         <PanelTitle
           eyebrow="Dispatch intelligence"
           title="Operations pulse"
-          action={<span className="pulse-live"><i /> Live</span>}
+          action={
+            <span className="pulse-live">
+              <i /> Live
+            </span>
+          }
         />
         <div className="ops-pulse-grid">
-          <div><span>Scheduled today</span><b>{scheduledToday}</b><small>planned stops</small></div>
-          <div><span>Needs assignment</span><b>{unassigned}</b><small>no rider or vehicle</small></div>
-          <div><span>Needs attention</span><b>{attention}</b><small>failed or partial</small></div>
-          <div><span>POD review</span><b>{summary?.pendingVerification ?? 0}</b><small>evidence waiting</small></div>
+          <div>
+            <span>Scheduled today</span>
+            <b>{scheduledToday}</b>
+            <small>planned stops</small>
+          </div>
+          <div>
+            <span>Needs assignment</span>
+            <b>{unassigned}</b>
+            <small>no rider or vehicle</small>
+          </div>
+          <div>
+            <span>Needs attention</span>
+            <b>{attention}</b>
+            <small>failed or partial</small>
+          </div>
+          <div>
+            <span>POD review</span>
+            <b>{summary?.pendingVerification ?? 0}</b>
+            <small>evidence waiting</small>
+          </div>
         </div>
       </section>
       <div className="split-grid">
@@ -3738,6 +3765,18 @@ export default function Home() {
                     label={t.driverPreview}
                     onClick={() => navigate("driver-preview")}
                   />
+                  <NavButton
+                    active={view === "reports"}
+                    icon={<BarChart3 />}
+                    label={t.reports}
+                    onClick={() => navigate("reports")}
+                  />
+                  <NavButton
+                    active={view === "fleet"}
+                    icon={<CalendarDays />}
+                    label={t.fleet}
+                    onClick={() => navigate("fleet")}
+                  />
                 </>
               )}
               {["Owner", "Director"].includes(user.role) && (
@@ -3922,46 +3961,449 @@ function OperationsCenterView({
   navigate: (view: ViewKey) => void;
   lang: Lang;
 }) {
-  const active = deliveries.filter(d => ["Out for Delivery", "Arrived"].includes(d.status));
-  const unassigned = deliveries.filter(d => !d.assignedDriverId && !["Delivered", "Cancelled"].includes(d.status));
-  const drivers = staff.filter(member => member.role === "Driver" && member.active);
+  const active = deliveries.filter(d =>
+    ["Out for Delivery", "Arrived"].includes(d.status)
+  );
+  const unassigned = deliveries.filter(
+    d => !d.assignedDriverId && !["Delivered", "Cancelled"].includes(d.status)
+  );
+  const drivers = staff.filter(
+    member => member.role === "Driver" && member.active
+  );
   return (
     <>
       <PageHeading
         eyebrow="Owner control / command center"
         title={lang === "UR" ? "آپریشنز سینٹر" : "Operations Center"}
         detail="A single control room for staffing, route readiness, active deliveries, and exceptions."
-        action={<Button onClick={() => navigate("settings")}><Settings2 size={15} /> Owner settings</Button>}
+        action={
+          <Button onClick={() => navigate("settings")}>
+            <Settings2 size={15} /> Owner settings
+          </Button>
+        }
       />
       <div className="metric-grid">
-        <Metric label="Active riders" value={drivers.length} hint="enabled Driver accounts" icon={<Truck />} tone="blue" />
-        <Metric label="On route now" value={active.length} hint="live delivery movements" icon={<MapPin />} tone="amber" />
-        <Metric label="Unassigned" value={unassigned.length} hint="needs dispatch action" icon={<UsersRound />} tone="coral" />
-        <Metric label="Total staff" value={staff.length} hint="all access roles" icon={<ShieldCheck />} />
+        <Metric
+          label="Active riders"
+          value={drivers.length}
+          hint="enabled Driver accounts"
+          icon={<Truck />}
+          tone="blue"
+        />
+        <Metric
+          label="On route now"
+          value={active.length}
+          hint="live delivery movements"
+          icon={<MapPin />}
+          tone="amber"
+        />
+        <Metric
+          label="Unassigned"
+          value={unassigned.length}
+          hint="needs dispatch action"
+          icon={<UsersRound />}
+          tone="coral"
+        />
+        <Metric
+          label="Total staff"
+          value={staff.length}
+          hint="all access roles"
+          icon={<ShieldCheck />}
+        />
       </div>
       <div className="split-grid owner-control-grid">
         <section className="panel">
-          <PanelTitle eyebrow="Dispatch readiness" title="Needs action" action={<Button variant="ghost" onClick={() => navigate("deliveries")}>Open deliveries <ArrowRight size={15} /></Button>} />
-          {unassigned.length ? <div className="control-list">{unassigned.slice(0, 6).map(delivery => <div className="control-row" key={delivery.id}><span><b>{delivery.customer}</b><small>{delivery.id} · {delivery.status}</small></span><StatusPill status={delivery.status} /></div>)}</div> : <EmptyState text="No unassigned deliveries." />}
+          <PanelTitle
+            eyebrow="Dispatch readiness"
+            title="Needs action"
+            action={
+              <Button variant="ghost" onClick={() => navigate("deliveries")}>
+                Open deliveries <ArrowRight size={15} />
+              </Button>
+            }
+          />
+          {unassigned.length ? (
+            <div className="control-list">
+              {unassigned.slice(0, 6).map(delivery => (
+                <div className="control-row" key={delivery.id}>
+                  <span>
+                    <b>{delivery.customer}</b>
+                    <small>
+                      {delivery.id} · {delivery.status}
+                    </small>
+                  </span>
+                  <StatusPill status={delivery.status} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="No unassigned deliveries." />
+          )}
         </section>
         <section className="panel">
-          <PanelTitle eyebrow="People" title="Staff access" action={<Button variant="ghost" onClick={() => navigate("staff")}>Manage staff <ArrowRight size={15} /></Button>} />
-          <div className="control-list">{staff.slice(0, 6).map(member => <div className="control-row" key={member.id}><span><b>{member.name}</b><small>@{member.username || "no-username"}</small></span><span className={`access ${member.active ? "active" : "inactive"}`}>{member.active ? "Active" : "Inactive"}</span></div>)}</div>
+          <PanelTitle
+            eyebrow="People"
+            title="Staff access"
+            action={
+              <Button variant="ghost" onClick={() => navigate("staff")}>
+                Manage staff <ArrowRight size={15} />
+              </Button>
+            }
+          />
+          <div className="control-list">
+            {staff.slice(0, 6).map(member => (
+              <div className="control-row" key={member.id}>
+                <span>
+                  <b>{member.name}</b>
+                  <small>@{member.username || "no-username"}</small>
+                </span>
+                <span
+                  className={`access ${member.active ? "active" : "inactive"}`}
+                >
+                  {member.active ? "Active" : "Inactive"}
+                </span>
+              </div>
+            ))}
+          </div>
         </section>
       </div>
     </>
   );
 }
-function DriverPreviewView({ deliveries, navigate }: { deliveries: Delivery[]; navigate: (view: ViewKey) => void }) {
-  const active = deliveries.find(delivery => !["Delivered", "Cancelled"].includes(delivery.status));
+function DriverPreviewView({
+  deliveries,
+  navigate,
+}: {
+  deliveries: Delivery[];
+  navigate: (view: ViewKey) => void;
+}) {
+  const active = deliveries.find(
+    delivery => !["Delivered", "Cancelled"].includes(delivery.status)
+  );
   return (
     <>
-      <PageHeading eyebrow="Owner preview / rider experience" title="Try as Driver" detail="Preview the mobile rider workflow without changing your Owner permissions or creating a driver session." action={<Button variant="secondary" onClick={() => navigate("driver")}><Truck size={15} /> Open driver workspace</Button>} />
-      <section className="driver-preview-banner"><div><span className="eyebrow">Read-only preview</span><h2>What a rider sees on the road</h2><p>Use this view to train staff and check the handover flow. GPS, scans, photos, and POD actions remain disabled here.</p></div><Truck size={38} /></section>
+      <PageHeading
+        eyebrow="Owner preview / rider experience"
+        title="Try as Driver"
+        detail="Preview the mobile rider workflow without changing your Owner permissions or creating a driver session."
+        action={
+          <Button variant="secondary" onClick={() => navigate("driver")}>
+            <Truck size={15} /> Open driver workspace
+          </Button>
+        }
+      />
+      <section className="driver-preview-banner">
+        <div>
+          <span className="eyebrow">Read-only preview</span>
+          <h2>What a rider sees on the road</h2>
+          <p>
+            Use this view to train staff and check the handover flow. GPS,
+            scans, photos, and POD actions remain disabled here.
+          </p>
+        </div>
+        <Truck size={38} />
+      </section>
       <div className="driver-preview-grid">
-        <section className="panel preview-phone"><div className="preview-phone-top"><span>NAZMI POD</span><b>Rider route</b></div><div className="preview-status"><span className="live-dot" /> Ready for today</div><h2>{active?.customer ?? "No assigned delivery"}</h2><p>{active?.address ?? "Create and assign a delivery to preview the destination."}</p><div className="preview-steps"><span className="done">1 <b>Start route</b></span><span>2 <b>Arrive at destination</b></span><span>3 <b>Submit POD</b></span></div><Button onClick={() => navigate("deliveries")}><PackageCheck size={15} /> View delivery register</Button></section>
-        <section className="panel"><PanelTitle eyebrow="Driver checklist" title="Every handover accounted for" /><div className="checklist"><span><Check size={15} /> Confirm challan and cartons</span><span><MapPin size={15} /> Share live GPS while driving</span><span><FileCheck2 size={15} /> Capture POD photos and remarks</span><span><ShieldCheck size={15} /> Submit for supervisor verification</span></div></section>
+        <section className="panel preview-phone">
+          <div className="preview-phone-top">
+            <span>NAZMI POD</span>
+            <b>Rider route</b>
+          </div>
+          <div className="preview-status">
+            <span className="live-dot" /> Ready for today
+          </div>
+          <h2>{active?.customer ?? "No assigned delivery"}</h2>
+          <p>
+            {active?.address ??
+              "Create and assign a delivery to preview the destination."}
+          </p>
+          <div className="preview-steps">
+            <span className="done">
+              1 <b>Start route</b>
+            </span>
+            <span>
+              2 <b>Arrive at destination</b>
+            </span>
+            <span>
+              3 <b>Submit POD</b>
+            </span>
+          </div>
+          <Button onClick={() => navigate("deliveries")}>
+            <PackageCheck size={15} /> View delivery register
+          </Button>
+        </section>
+        <section className="panel">
+          <PanelTitle
+            eyebrow="Driver checklist"
+            title="Every handover accounted for"
+          />
+          <div className="checklist">
+            <span>
+              <Check size={15} /> Confirm challan and cartons
+            </span>
+            <span>
+              <MapPin size={15} /> Share live GPS while driving
+            </span>
+            <span>
+              <FileCheck2 size={15} /> Capture POD photos and remarks
+            </span>
+            <span>
+              <ShieldCheck size={15} /> Submit for supervisor verification
+            </span>
+          </div>
+        </section>
       </div>
+    </>
+  );
+}
+function ReportsView({
+  deliveries,
+  navigate,
+  lang,
+}: {
+  deliveries: Delivery[];
+  navigate: (view: ViewKey) => void;
+  lang: Lang;
+}) {
+  const delivered = deliveries.filter(d => d.status === "Delivered").length;
+  const partial = deliveries.filter(
+    d => d.status === "Partially Delivered"
+  ).length;
+  const failed = deliveries.filter(d => d.status === "Failed").length;
+  const cartons = deliveries.reduce(
+    (sum, delivery) => sum + delivery.cartons,
+    0
+  );
+  const deliveredCartons = deliveries.reduce(
+    (sum, delivery) => sum + delivery.deliveredCartons,
+    0
+  );
+  const exportReport = () => {
+    const rows = [
+      [
+        "Delivery ID",
+        "Customer",
+        "Status",
+        "Driver",
+        "Cartons",
+        "Delivered",
+        "POD",
+      ],
+      ...deliveries.map(d => [
+        d.id,
+        d.customer,
+        d.status,
+        d.driver?.name ?? "Unassigned",
+        String(d.cartons),
+        String(d.deliveredCartons),
+        d.proofStatus,
+      ]),
+    ];
+    const csv = rows.map(row => row.map(csvEscape).join(",")).join("\n");
+    const url = URL.createObjectURL(
+      new Blob([csv], { type: "text/csv;charset=utf-8" })
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `nazmi-delivery-report-${localDateKey(new Date())}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <>
+      <PageHeading
+        eyebrow="Owner reporting / exports"
+        title={lang === "UR" ? "رپورٹس اور ایکسپورٹس" : "Reports & Exports"}
+        detail="Track delivery outcomes, carton movement, POD completion, and download a clean operational report."
+        action={
+          <Button onClick={exportReport}>
+            <Download size={15} /> Export CSV
+          </Button>
+        }
+      />
+      <div className="metric-grid">
+        <Metric
+          label="Completion rate"
+          value={cartons ? Math.round((deliveredCartons / cartons) * 100) : 0}
+          hint="percent of cartons delivered"
+          icon={<BarChart3 />}
+          tone="blue"
+        />
+        <Metric
+          label="Delivered orders"
+          value={delivered}
+          hint="fully completed"
+          icon={<Check />}
+        />
+        <Metric
+          label="Partial orders"
+          value={partial}
+          hint="needs reconciliation"
+          icon={<AlertTriangle />}
+          tone="amber"
+        />
+        <Metric
+          label="Failed orders"
+          value={failed}
+          hint="needs follow-up"
+          icon={<X />}
+          tone="coral"
+        />
+      </div>
+      <section className="panel report-breakdown">
+        <PanelTitle
+          eyebrow="Quality control"
+          title="Delivery outcome breakdown"
+        />
+        <div className="outcome-bars">
+          <span>
+            <b>Delivered</b>
+            <i>
+              <em
+                style={{
+                  width: `${deliveries.length ? (delivered / deliveries.length) * 100 : 0}%`,
+                }}
+              />
+            </i>
+            <strong>{delivered}</strong>
+          </span>
+          <span>
+            <b>Partial</b>
+            <i>
+              <em
+                className="amber-bar"
+                style={{
+                  width: `${deliveries.length ? (partial / deliveries.length) * 100 : 0}%`,
+                }}
+              />
+            </i>
+            <strong>{partial}</strong>
+          </span>
+          <span>
+            <b>Failed</b>
+            <i>
+              <em
+                className="red-bar"
+                style={{
+                  width: `${deliveries.length ? (failed / deliveries.length) * 100 : 0}%`,
+                }}
+              />
+            </i>
+            <strong>{failed}</strong>
+          </span>
+        </div>
+        <div className="report-actions">
+          <Button variant="secondary" onClick={() => navigate("pod")}>
+            <FileCheck2 size={15} /> Review POD queue
+          </Button>
+          <Button variant="ghost" onClick={() => navigate("audit")}>
+            <ShieldCheck size={15} /> Open audit log
+          </Button>
+        </div>
+      </section>
+    </>
+  );
+}
+function FleetView({
+  staff,
+  deliveries,
+  navigate,
+}: {
+  staff: User[];
+  deliveries: Delivery[];
+  navigate: (view: ViewKey) => void;
+}) {
+  const riders = staff.filter(member => member.role === "Driver");
+  return (
+    <>
+      <PageHeading
+        eyebrow="Owner resources / field team"
+        title="Fleet & Riders"
+        detail="See rider availability, assigned workload, and vehicle information in one place."
+        action={
+          <Button onClick={() => navigate("staff")}>
+            <UserPlus size={15} /> Add rider
+          </Button>
+        }
+      />
+      <div className="metric-grid">
+        <Metric
+          label="Active riders"
+          value={riders.filter(rider => rider.active).length}
+          hint="ready for dispatch"
+          icon={<Truck />}
+          tone="blue"
+        />
+        <Metric
+          label="Rider accounts"
+          value={riders.length}
+          hint="all Driver roles"
+          icon={<UsersRound />}
+        />
+        <Metric
+          label="Assigned routes"
+          value={
+            deliveries.filter(delivery => delivery.assignedDriverId).length
+          }
+          hint="delivery records"
+          icon={<MapPin />}
+          tone="amber"
+        />
+        <Metric
+          label="Unassigned routes"
+          value={
+            deliveries.filter(
+              delivery =>
+                !delivery.assignedDriverId &&
+                !["Delivered", "Cancelled"].includes(delivery.status)
+            ).length
+          }
+          hint="dispatch queue"
+          icon={<AlertTriangle />}
+          tone="coral"
+        />
+      </div>
+      <section className="panel fleet-list-panel">
+        <PanelTitle
+          eyebrow="Rider roster"
+          title="Team readiness"
+          action={
+            <Button variant="ghost" onClick={() => navigate("staff")}>
+              Manage access <ArrowRight size={15} />
+            </Button>
+          }
+        />
+        <div className="fleet-list">
+          {riders.length ? (
+            riders.map(rider => {
+              const load = deliveries.filter(
+                delivery =>
+                  delivery.assignedDriverId === rider.id &&
+                  !["Delivered", "Cancelled"].includes(delivery.status)
+              ).length;
+              return (
+                <div className="fleet-row" key={rider.id}>
+                  <Avatar name={rider.name} />
+                  <span>
+                    <b>{rider.name}</b>
+                    <small>
+                      {rider.phone || "No phone"} · {load} active route
+                      {load === 1 ? "" : "s"}
+                    </small>
+                  </span>
+                  <span
+                    className={`access ${rider.active ? "active" : "inactive"}`}
+                  >
+                    {rider.active ? "Available" : "Inactive"}
+                  </span>
+                </div>
+              );
+            })
+          ) : (
+            <EmptyState text="No rider accounts yet." />
+          )}
+        </div>
+      </section>
     </>
   );
 }
@@ -4012,9 +4454,24 @@ function WorkspaceView({
   if (view === "tracker")
     return <TrackerView deliveries={deliveries} user={user} lang={lang} />;
   if (view === "operations")
-    return <OperationsCenterView deliveries={deliveries} staff={staff} navigate={navigate} lang={lang} />;
+    return (
+      <OperationsCenterView
+        deliveries={deliveries}
+        staff={staff}
+        navigate={navigate}
+        lang={lang}
+      />
+    );
   if (view === "driver-preview")
     return <DriverPreviewView deliveries={deliveries} navigate={navigate} />;
+  if (view === "reports")
+    return (
+      <ReportsView deliveries={deliveries} navigate={navigate} lang={lang} />
+    );
+  if (view === "fleet")
+    return (
+      <FleetView staff={staff} deliveries={deliveries} navigate={navigate} />
+    );
   if (view === "settings") return <SettingsView lang={lang} />;
   if (view === "audit") return <AuditView lang={lang} />;
   return (

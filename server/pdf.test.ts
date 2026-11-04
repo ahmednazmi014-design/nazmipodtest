@@ -77,7 +77,7 @@ describe("createPodPdf photos", () => {
     const pdf = pdfFor([PHOTO, PHOTO, PHOTO, PHOTO]);
     const text = pdf.toString("latin1");
     expect((text.match(/\/Subtype \/Image/g) ?? []).length).toBe(3);
-    expect((text.match(/\/Type \/Page\b/g) ?? []).length).toBe(4);
+    expect((text.match(/\/Type \/Page\b/g) ?? []).length).toBe(5);
   });
 });
 
