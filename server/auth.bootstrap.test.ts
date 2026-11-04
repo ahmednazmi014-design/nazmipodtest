@@ -128,8 +128,8 @@ describe("secure auth bootstrap", () => {
         `Bearer ${token}`
       )
     );
-    await expect(caller.dashboard.summary()).rejects.toMatchObject({
-      code: "FORBIDDEN",
+    await expect(caller.dashboard.summary()).resolves.toMatchObject({
+      total: 0,
     });
     await expect(
       caller.auth.changePassword({ newPassword: "short" })
@@ -170,7 +170,7 @@ describe("secure auth bootstrap", () => {
     expect(added.name).toBe("Ahsan Ahmed");
     expect(added.email).toBe("");
     expect(added.role).toBe("Owner");
-    expect(added.mustChangePassword).toBe(true);
+    expect(added.mustChangePassword).toBe(false);
     expect(verifyPassword("secret-test-password", added.passwordHash)).toBe(
       true
     );

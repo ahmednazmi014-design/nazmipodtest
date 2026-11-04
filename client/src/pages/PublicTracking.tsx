@@ -1,24 +1,49 @@
 import { useEffect, useState } from "react";
 import {
+  AlertTriangle,
   Check,
+  CheckCircle2,
   Clock3,
   MapPin,
   PackageCheck,
   RefreshCw,
+  Send,
   Truck,
 } from "lucide-react";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
 export default function PublicTracking({ token }: { token: string }) {
   const [urdu, setUrdu] = useState(
     () => localStorage.getItem("nazmi-lang") === "UR"
   );
+  const [customerName, setCustomerName] = useState("");
+  const [confirmNotes, setConfirmNotes] = useState("");
+  const [issue, setIssue] = useState("Missing cartons");
+  const [issueMessage, setIssueMessage] = useState("");
+  const [contact, setContact] = useState("");
   const query = trpc.deliveries.getPublicTracking.useQuery(
     { token },
     { refetchInterval: 15000, retry: false }
   );
+  const confirm = trpc.deliveries.customerConfirm.useMutation({
+    onSuccess: () => {
+      toast.success(
+        urdu ? "آپ کی تصدیق محفوظ ہو گئی" : "Your confirmation was saved"
+      );
+      void query.refetch();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const report = trpc.deliveries.customerIssue.useMutation({
+    onSuccess: () => {
+      toast.success(urdu ? "رپورٹ بھیج دی گئی" : "Issue sent to dispatch");
+      setIssueMessage("");
+      setContact("");
+    },
+    onError: error => toast.error(error.message),
+  });
   const data = query.data;
-
   useEffect(() => {
     document.title = "Delivery tracking | NAZMI POD";
     let meta = document.querySelector<HTMLMetaElement>('meta[name="robots"]');
@@ -33,7 +58,6 @@ export default function PublicTracking({ token }: { token: string }) {
       meta?.remove();
     };
   }, []);
-
   const status = data?.status ?? "";
   const moving = ["Out for Delivery", "Arrived"].includes(status);
   const gps = moving ? data?.gps : null;
@@ -43,7 +67,21 @@ export default function PublicTracking({ token }: { token: string }) {
   const mapUrl = gps
     ? `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${gps.lat}%2C${gps.lng}`
     : "";
-
+  const destinationUrl = data?.address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(data.address)}`
+    : "";
+  const formatDate = (value?: string | null) =>
+    value
+      ? new Date(value).toLocaleString(urdu ? "ur-PK" : "en-PK", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : "—";
+  const submitConfirmation = (received: boolean) => {
+    if (customerName.trim().length < 2)
+      return toast.error(urdu ? "نام درج کریں" : "Enter your name first");
+    confirm.mutate({ token, customerName, received, notes: confirmNotes });
+  };
   return (
     <main
       className={`customer-track-page${urdu ? " rtl" : ""}`}
@@ -64,7 +102,6 @@ export default function PublicTracking({ token }: { token: string }) {
           {urdu ? "EN" : "اردو"}
         </button>
       </header>
-
       <section className="customer-track-card">
         {query.isLoading ? (
           <div className="customer-track-state">
@@ -94,7 +131,9 @@ export default function PublicTracking({ token }: { token: string }) {
             </div>
             <div className="customer-track-title-row">
               <div>
-                <h1>{urdu ? "آپ کی ڈیلیوری" : "Your delivery"}</h1>
+                <h1>
+                  {data.customer || (urdu ? "آپ کی ڈیلیوری" : "Your delivery")}
+                </h1>
                 <span className="mono">{data.deliveryId}</span>
               </div>
               <span
@@ -143,12 +182,7 @@ export default function PublicTracking({ token }: { token: string }) {
                   <Clock3 size={15} />
                   {urdu ? "مقررہ وقت" : "Scheduled"}
                 </span>
-                <b>
-                  {new Date(data.scheduledAt).toLocaleString(
-                    urdu ? "ur-PK" : "en-PK",
-                    { dateStyle: "medium", timeStyle: "short" }
-                  )}
-                </b>
+                <b>{formatDate(data.scheduledAt)}</b>
               </div>
               <div>
                 <span>
@@ -164,13 +198,53 @@ export default function PublicTracking({ token }: { token: string }) {
                   <RefreshCw size={15} />
                   {urdu ? "آخری اپ ڈیٹ" : "Last update"}
                 </span>
-                <b>
-                  {new Date(data.updatedAt).toLocaleString(
-                    urdu ? "ur-PK" : "en-PK",
-                    { dateStyle: "medium", timeStyle: "short" }
-                  )}
-                </b>
+                <b>{formatDate(data.updatedAt)}</b>
               </div>
+            </div>
+            <div className="customer-track-destination">
+              <div>
+                <MapPin size={16} />
+                <span>
+                  <b>{urdu ? "ڈیلیوری کا مقام" : "Delivery destination"}</b>
+                  <small>{data.address}</small>
+                </span>
+              </div>
+              {destinationUrl && (
+                <a
+                  className="button secondary"
+                  href={destinationUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {urdu ? "نقشہ کھولیں" : "Open map"}
+                </a>
+              )}
+            </div>
+            {moving && (
+              <div className="customer-track-eta">
+                <Truck size={17} />
+                <span>
+                  <b>{urdu ? "متوقع آمد" : "Estimated arrival"}</b>
+                  <small>
+                    {data.estimatedArrival
+                      ? formatDate(data.estimatedArrival)
+                      : `${data.etaMinutes ?? "—"} min`}
+                  </small>
+                </span>
+              </div>
+            )}
+            <div className="customer-track-timeline">
+              {(data.timeline ?? []).map((item: any) => (
+                <div className={item.complete ? "complete" : ""} key={item.key}>
+                  <i />{" "}
+                  <span>
+                    <b>
+                      {urdu && item.key === "completed" ? "مکمل" : item.label}
+                    </b>
+                    <small>{formatDate(item.at)}</small>
+                  </span>
+                </div>
+              ))}
             </div>
             {gps && mapUrl && (
               <div className="customer-track-map">
@@ -200,6 +274,91 @@ export default function PublicTracking({ token }: { token: string }) {
                     : "Live location will appear here when the delivery is on the way."}
                 </p>
               )}
+            <div className="customer-track-actions">
+              <h2>
+                {data.confirmation
+                  ? urdu
+                    ? "آپ کی تصدیق موصول ہو گئی"
+                    : "Your confirmation is received"
+                  : urdu
+                    ? "ڈیلیوری کی تصدیق"
+                    : "Confirm your delivery"}
+              </h2>
+              {!data.confirmation && (
+                <>
+                  <input
+                    value={customerName}
+                    onChange={e => setCustomerName(e.target.value)}
+                    placeholder={urdu ? "آپ کا نام" : "Your name"}
+                  />
+                  <textarea
+                    value={confirmNotes}
+                    onChange={e => setConfirmNotes(e.target.value)}
+                    placeholder={urdu ? "اختیاری نوٹ" : "Optional note"}
+                  />
+                  <div>
+                    <button
+                      className="button primary"
+                      onClick={() => submitConfirmation(true)}
+                      disabled={confirm.isPending}
+                    >
+                      <CheckCircle2 size={15} />
+                      {urdu ? "موصول ہو گیا" : "I received it"}
+                    </button>
+                    <button
+                      className="button secondary"
+                      onClick={() => submitConfirmation(false)}
+                      disabled={confirm.isPending}
+                    >
+                      <AlertTriangle size={15} />
+                      {urdu ? "مسئلہ ہے" : "There is an issue"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="customer-track-issue">
+              <h2>
+                <AlertTriangle size={16} />
+                {urdu ? "مسئلہ رپورٹ کریں" : "Report a delivery issue"}
+              </h2>
+              <select value={issue} onChange={e => setIssue(e.target.value)}>
+                <option>Missing cartons</option>
+                <option>Damaged goods</option>
+                <option>Wrong delivery</option>
+                <option>Late delivery</option>
+                <option>Other</option>
+              </select>
+              <textarea
+                value={issueMessage}
+                onChange={e => setIssueMessage(e.target.value)}
+                placeholder={
+                  urdu ? "تفصیل لکھیں" : "Tell dispatch what happened"
+                }
+              />
+              <input
+                value={contact}
+                onChange={e => setContact(e.target.value)}
+                placeholder={
+                  urdu ? "رابطہ نمبر (اختیاری)" : "Phone or email (optional)"
+                }
+              />
+              <button
+                className="button secondary"
+                onClick={() =>
+                  report.mutate({
+                    token,
+                    issue: issue as any,
+                    message: issueMessage,
+                    contact,
+                  })
+                }
+                disabled={report.isPending || issueMessage.trim().length < 2}
+              >
+                <Send size={15} />
+                {urdu ? "رپورٹ بھیجیں" : "Send report"}
+              </button>
+            </div>
           </>
         )}
       </section>

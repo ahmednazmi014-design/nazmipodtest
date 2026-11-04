@@ -2351,3 +2351,223 @@ a {
     flex-direction: column;
   }
 }
+.customer-track-destination,
+.customer-track-eta,
+.customer-track-actions,
+.customer-track-issue {
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid #dcebe4;
+  border-radius: 11px;
+  background: #f6fbf8;
+}
+.customer-track-destination,
+.customer-track-eta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.customer-track-destination > div,
+.customer-track-eta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.customer-track-destination > div > svg,
+.customer-track-eta > svg {
+  color: #08785e;
+}
+.customer-track-destination b,
+.customer-track-destination small,
+.customer-track-eta b,
+.customer-track-eta small {
+  display: block;
+}
+.customer-track-destination b,
+.customer-track-eta b {
+  font-size: 11px;
+}
+.customer-track-destination small,
+.customer-track-eta small {
+  margin-top: 3px;
+  color: #74887d;
+  font-size: 10px;
+}
+.customer-track-timeline {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #e4eee9;
+  border-radius: 11px;
+  background: #fff;
+}
+.customer-track-timeline > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #87978f;
+}
+.customer-track-timeline i {
+  width: 9px;
+  height: 9px;
+  border: 2px solid #b6c9c0;
+  border-radius: 50%;
+}
+.customer-track-timeline .complete {
+  color: #27795f;
+}
+.customer-track-timeline .complete i {
+  border-color: #159b75;
+  background: #159b75;
+}
+.customer-track-timeline b,
+.customer-track-timeline small {
+  display: block;
+}
+.customer-track-timeline b {
+  font-size: 11px;
+}
+.customer-track-timeline small {
+  margin-top: 2px;
+  font-size: 10px;
+}
+.customer-track-actions h2,
+.customer-track-issue h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 11px;
+  font-size: 14px;
+}
+.customer-track-actions input,
+.customer-track-actions textarea,
+.customer-track-issue input,
+.customer-track-issue textarea,
+.customer-track-issue select {
+  margin-top: 8px;
+}
+.customer-track-actions > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.customer-track-actions .button {
+  flex: 1;
+}
+.customer-track-issue {
+  background: #fffaf0;
+  border-color: #f1dfb1;
+}
+.customer-track-issue h2 {
+  color: #8b6b26;
+}
+.customer-track-issue .button {
+  margin-top: 10px;
+}
+.customer-track-card .button {
+  min-height: 34px;
+  font-size: 11px;
+}
+@media (max-width: 700px) {
+  .customer-track-destination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .customer-track-destination .button {
+    width: 100%;
+  }
+  .customer-track-actions > div {
+    flex-direction: column;
+  }
+  .customer-track-eta {
+    align-items: flex-start;
+  }
+}
+.driver-destination-map {
+  margin-bottom: 17px;
+}
+.driver-destination-map iframe {
+  display: block;
+  width: 100%;
+  height: 245px;
+  border: 0;
+  border-top: 1px solid #edf3f0;
+}
+.driver-destination-address {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 20px;
+  color: #62776c;
+  font-size: 11px;
+}
+.driver-destination-address svg {
+  flex: 0 0 auto;
+  color: #08785e;
+}
+.driver-destination-map .panel-title {
+  align-items: center;
+}
+.driver-destination-map .panel-title h2 {
+  font-size: 15px;
+}
+.driver-destination-map .button {
+  min-height: 32px;
+}
+@media (max-width: 700px) {
+  .driver-destination-map .panel-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .driver-destination-map .panel-title .button {
+    width: 100%;
+  }
+  .driver-destination-map iframe {
+    height: 210px;
+  }
+}
+.settings-security-panel {
+  margin-top: 17px;
+}
+.session-list {
+  border-top: 1px solid #edf3f0;
+}
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #edf3f0;
+}
+.session-row:last-child {
+  border-bottom: 0;
+}
+.session-row b,
+.session-row small {
+  display: block;
+}
+.session-row b {
+  font-size: 11px;
+}
+.session-row small {
+  margin-top: 3px;
+  color: #87968f;
+  font-size: 10px;
+}
+.session-row .button {
+  min-height: 31px;
+  font-size: 10px;
+}
+@media (max-width: 700px) {
+  .session-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .session-row .button {
+    width: 100%;
+  }
+}

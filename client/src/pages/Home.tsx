@@ -2532,6 +2532,12 @@ function DriverView({
   const active = deliveries.find(d =>
     ["Out for Delivery", "Arrived", "Assigned", "Scheduled"].includes(d.status)
   );
+  const destinationMapUrl = active?.address
+    ? `https://www.google.com/maps?q=${encodeURIComponent(active.address)}&output=embed`
+    : "";
+  const destinationDirectionsUrl = active?.address
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(active.address)}`
+    : "";
   const [tracking, setTracking] = useState(false);
   const [gpsMessage, setGpsMessage] = useState("");
   const [gps, setGps] = useState<Delivery["gps"]>(active?.gps ?? null);
@@ -3054,6 +3060,38 @@ function DriverView({
             </div>
             <span className="mono">{active.id}</span>
           </div>
+          {destinationMapUrl && (
+            <section className="panel driver-destination-map">
+              <div className="panel-title">
+                <div>
+                  <span className="eyebrow">
+                    {lang === "UR" ? "ڈیلیوری کا مقام" : "DELIVERY DESTINATION"}
+                  </span>
+                  <h2>
+                    {lang === "UR" ? "یہاں پہنچنا ہے" : "Where to deliver"}
+                  </h2>
+                </div>
+                <a
+                  className="button secondary"
+                  href={destinationDirectionsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <MapPin size={15} />
+                  {lang === "UR" ? "راستہ کھولیں" : "Open directions"}
+                </a>
+              </div>
+              <iframe
+                title="Delivery destination map"
+                src={destinationMapUrl}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+              />
+              <p className="driver-destination-address">
+                <MapPin size={14} /> {active.address}
+              </p>
+            </section>
+          )}
           <div className="driver-grid">
             <section className="panel proof-form">
               <PanelTitle
@@ -3332,10 +3370,26 @@ function DriverView({
 
 function SettingsView({ lang }: { lang: Lang }) {
   const query = trpc.settings.get.useQuery();
+  const sessions = trpc.auth.sessions.useQuery();
   const update = trpc.settings.update.useMutation({
     onSuccess: () => toast.success("Settings saved"),
   });
+  const revokeSession = trpc.auth.revokeSession.useMutation({
+    onSuccess: () => void sessions.refetch(),
+  });
+  const changePassword = trpc.auth.changePassword.useMutation({
+    onSuccess: () => {
+      toast.success("Password changed. Other sessions were signed out.");
+      setNewPassword("");
+      setConfirmPassword("");
+      setShowPassword(false);
+    },
+    onError: error => toast.error(error.message),
+  });
   const [form, setForm] = useState<any>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   useEffect(() => {
     if (query.data && !form) setForm(query.data);
   }, [query.data, form]);
@@ -3384,6 +3438,79 @@ function SettingsView({ lang }: { lang: Lang }) {
           </Button>
         </div>
       </section>
+      <section className="panel settings-security-panel">
+        <div className="panel-title">
+          <div>
+            <span className="eyebrow">Security</span>
+            <h2>Account security</h2>
+          </div>
+          <Button variant="secondary" onClick={() => setShowPassword(true)}>
+            Change password
+          </Button>
+        </div>
+        <div className="session-list">
+          {(sessions.data ?? []).map(session => (
+            <div className="session-row" key={session.id}>
+              <div>
+                <b>
+                  {session.current ? "Current browser session" : session.label}
+                </b>
+                <small>
+                  Signed in {formatDate(session.createdAt)} · Expires{" "}
+                  {formatDate(session.expiresAt)}
+                </small>
+              </div>
+              {!session.current && (
+                <Button
+                  variant="danger"
+                  onClick={() =>
+                    revokeSession.mutate({ sessionId: session.id })
+                  }
+                >
+                  Revoke
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+      {showPassword && (
+        <Modal title="Change password" onClose={() => setShowPassword(false)}>
+          <Field label="New password" hint="At least 12 characters">
+            <input
+              type="password"
+              minLength={12}
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+          </Field>
+          <Field label="Confirm new password">
+            <input
+              type="password"
+              minLength={12}
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+          </Field>
+          <div className="modal-actions">
+            <Button variant="secondary" onClick={() => setShowPassword(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                newPassword.length < 12 ||
+                newPassword !== confirmPassword ||
+                changePassword.isPending
+              }
+              onClick={() => changePassword.mutate({ newPassword })}
+            >
+              Save password
+            </Button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
@@ -3507,10 +3634,6 @@ export default function Home() {
   if (me.isLoading) return <Loading />;
   if (!user)
     return <AuthScreen lang={lang} onComplete={() => void me.refetch()} />;
-  if (user.mustChangePassword)
-    return (
-      <PasswordChangeScreen lang={lang} onChanged={() => void me.refetch()} />
-    );
   const t = ui[lang];
   return (
     <div className={`app-shell ${lang === "UR" ? "rtl" : ""}`}>

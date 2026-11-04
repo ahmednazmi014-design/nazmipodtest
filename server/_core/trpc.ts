@@ -25,20 +25,8 @@ const requireUser = t.middleware(async opts => {
   });
 });
 
-const requireChangedPassword = t.middleware(async opts => {
-  if (opts.ctx.user?.mustChangePassword) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Change your temporary password before continuing.",
-    });
-  }
-  return opts.next();
-});
-
 export const passwordChangeProcedure = t.procedure.use(requireUser);
-export const protectedProcedure = t.procedure
-  .use(requireUser)
-  .use(requireChangedPassword);
+export const protectedProcedure = t.procedure.use(requireUser);
 
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
@@ -47,13 +35,6 @@ export const adminProcedure = t.procedure.use(
     if (!ctx.user || ctx.user.role !== "Owner") {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
-    if (ctx.user.mustChangePassword) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Change your temporary password before continuing.",
-      });
-    }
-
     return next({
       ctx: {
         ...ctx,
