@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
   Check,
@@ -366,6 +366,53 @@ export default function PublicTracking({ token }: { token: string }) {
         {data?.companyName || "NAZMI PACKAGING"} ·{" "}
         {urdu ? "محفوظ ڈیلیوری ٹریکنگ" : "Secure delivery tracking"}
       </footer>
+    </main>
+  );
+}
+
+export function CustomerTrackingLanding() {
+  const [link, setLink] = useState("");
+  const [urdu, setUrdu] = useState(
+    () => localStorage.getItem("nazmi-lang") === "UR"
+  );
+  const openTracking = (event: FormEvent) => {
+    event.preventDefault();
+    const value = link.trim();
+    if (!value) return;
+    const token = value.match(/\/track\/([^/?#]+)/)?.[1] ?? value;
+    window.location.assign(`/track/${encodeURIComponent(token)}`);
+  };
+  useEffect(() => {
+    document.title = "Customer delivery tracking | NAZMI POD";
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="robots"]');
+    if (meta) meta.content = "noindex, nofollow, noarchive";
+  }, []);
+  return (
+    <main className={`customer-portal-page${urdu ? " rtl" : ""}`} dir={urdu ? "rtl" : "ltr"}>
+      <header className="customer-track-header">
+        <a className="customer-track-brand" href="/customer-tracking" aria-label="NAZMI POD">
+          <span className="customer-track-mark">N</span>
+          <span><b>NAZMI POD</b><small>NAZMI PACKAGING</small></span>
+        </a>
+        <button className="language-button" onClick={() => { const next = !urdu; setUrdu(next); localStorage.setItem("nazmi-lang", next ? "UR" : "EN"); }}>
+          {urdu ? "EN" : "اردو"}
+        </button>
+      </header>
+      <section className="customer-portal-hero">
+        <span className="customer-track-eyebrow">{urdu ? "کسٹمر پورٹل" : "CUSTOMER PORTAL"}</span>
+        <h1>{urdu ? "اپنی ڈیلیوری ٹریک کریں" : "Track your delivery"}</h1>
+        <p>{urdu ? "اپنے بھیجے گئے محفوظ ٹریکنگ لنک کو یہاں کھولیں۔ لاگ اِن کی ضرورت نہیں۔" : "Open the secure tracking link sent to you. No account or staff login is required."}</p>
+        <form onSubmit={openTracking} className="customer-portal-form">
+          <input value={link} onChange={e => setLink(e.target.value)} placeholder={urdu ? "ٹریکنگ لنک پیسٹ کریں" : "Paste your tracking link or token"} aria-label="Tracking link" />
+          <button className="button primary" type="submit"><PackageCheck size={16} />{urdu ? "ڈیلیوری دیکھیں" : "View delivery"}</button>
+        </form>
+        <div className="customer-portal-promises">
+          <span><Truck size={16} /><b>{urdu ? "لائیو ETA" : "Live ETA"}</b><small>{urdu ? "روانگی کے بعد" : "When on route"}</small></span>
+          <span><MapPin size={16} /><b>{urdu ? "محفوظ مقام" : "Safe location"}</b><small>{urdu ? "صرف ٹریکنگ لنک سے" : "Link-only access"}</small></span>
+          <span><CheckCircle2 size={16} /><b>{urdu ? "آسان تصدیق" : "Easy confirmation"}</b><small>{urdu ? "رسید کی تصدیق" : "Receipt confirmation"}</small></span>
+        </div>
+      </section>
+      <footer className="customer-track-footer">NAZMI PACKAGING · {urdu ? "محفوظ ڈیلیوری ٹریکنگ" : "Secure delivery tracking"}</footer>
     </main>
   );
 }

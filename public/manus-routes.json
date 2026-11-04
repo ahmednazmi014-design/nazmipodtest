@@ -6,8 +6,12 @@
     { "path": "/pod", "title": "Proof of delivery" },
     { "path": "/tracker", "title": "Live rider tracker" },
     { "path": "/driver", "title": "Rider workspace" },
+    { "path": "/driver-preview", "title": "Try as Driver" },
+    { "path": "/operations", "title": "Operations Center" },
     { "path": "/settings", "title": "Company settings" },
     { "path": "/audit", "title": "Audit log" },
+    { "path": "/customer-tracking", "title": "Customer tracking portal" },
+    { "path": "/track", "title": "Customer tracking portal" },
     { "path": "/track/:token", "title": "Secure delivery tracking" }
   ]
 }

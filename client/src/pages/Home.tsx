@@ -51,7 +51,7 @@ import {
   removePendingProof,
   savePendingProof,
 } from "@/lib/offlinePodQueue";
-import PublicTracking from "./PublicTracking";
+import PublicTracking, { CustomerTrackingLanding } from "./PublicTracking";
 import { toast } from "sonner";
 
 const roles = [
@@ -82,6 +82,8 @@ type ViewKey =
   | "pod"
   | "tracker"
   | "driver"
+  | "driver-preview"
+  | "operations"
   | "settings"
   | "audit";
 type User = {
@@ -157,6 +159,8 @@ const ui = {
     settings: "Company settings",
     audit: "Audit log",
     driver: "My route",
+    driverPreview: "Try as Driver",
+    operations: "Operations center",
     signOut: "Sign out",
     newDelivery: "New delivery",
     search: "Search deliveries",
@@ -230,6 +234,8 @@ const ui = {
     settings: "کمپنی سیٹنگز",
     audit: "آڈٹ لاگ",
     driver: "میرا روٹ",
+    driverPreview: "ڈرائیور پیش نظارہ",
+    operations: "آپریشنز سینٹر",
     signOut: "سائن آؤٹ",
     newDelivery: "نئی ڈیلیوری",
     search: "ڈیلیوری تلاش کریں",
@@ -3609,6 +3615,9 @@ function Modal({
 
 export default function Home() {
   const trackToken = window.location.pathname.match(/^\/track\/([^/]+)$/)?.[1];
+  const customerPortal = ["/customer-tracking", "/track"].includes(
+    window.location.pathname
+  );
   const me = trpc.auth.me.useQuery();
   const notificationsQuery = trpc.notifications.list.useQuery(undefined, {
     enabled: !trackToken,
@@ -3654,6 +3663,7 @@ export default function Home() {
   };
   if (trackToken)
     return <PublicTracking token={decodeURIComponent(trackToken)} />;
+  if (customerPortal) return <CustomerTrackingLanding />;
   if (me.isLoading) return <Loading />;
   if (!user)
     return <AuthScreen lang={lang} onComplete={() => void me.refetch()} />;
@@ -3714,6 +3724,22 @@ export default function Home() {
                 label={t.staff}
                 onClick={() => navigate("staff")}
               />
+              {user.role === "Owner" && (
+                <>
+                  <NavButton
+                    active={view === "operations"}
+                    icon={<Activity />}
+                    label={t.operations}
+                    onClick={() => navigate("operations")}
+                  />
+                  <NavButton
+                    active={view === "driver-preview"}
+                    icon={<Truck />}
+                    label={t.driverPreview}
+                    onClick={() => navigate("driver-preview")}
+                  />
+                </>
+              )}
               {["Owner", "Director"].includes(user.role) && (
                 <NavButton
                   active={view === "settings"}
@@ -3885,6 +3911,60 @@ function DriverWorkspace({ lang, user }: { lang: Lang; user: User }) {
     />
   );
 }
+function OperationsCenterView({
+  deliveries,
+  staff,
+  navigate,
+  lang,
+}: {
+  deliveries: Delivery[];
+  staff: User[];
+  navigate: (view: ViewKey) => void;
+  lang: Lang;
+}) {
+  const active = deliveries.filter(d => ["Out for Delivery", "Arrived"].includes(d.status));
+  const unassigned = deliveries.filter(d => !d.assignedDriverId && !["Delivered", "Cancelled"].includes(d.status));
+  const drivers = staff.filter(member => member.role === "Driver" && member.active);
+  return (
+    <>
+      <PageHeading
+        eyebrow="Owner control / command center"
+        title={lang === "UR" ? "آپریشنز سینٹر" : "Operations Center"}
+        detail="A single control room for staffing, route readiness, active deliveries, and exceptions."
+        action={<Button onClick={() => navigate("settings")}><Settings2 size={15} /> Owner settings</Button>}
+      />
+      <div className="metric-grid">
+        <Metric label="Active riders" value={drivers.length} hint="enabled Driver accounts" icon={<Truck />} tone="blue" />
+        <Metric label="On route now" value={active.length} hint="live delivery movements" icon={<MapPin />} tone="amber" />
+        <Metric label="Unassigned" value={unassigned.length} hint="needs dispatch action" icon={<UsersRound />} tone="coral" />
+        <Metric label="Total staff" value={staff.length} hint="all access roles" icon={<ShieldCheck />} />
+      </div>
+      <div className="split-grid owner-control-grid">
+        <section className="panel">
+          <PanelTitle eyebrow="Dispatch readiness" title="Needs action" action={<Button variant="ghost" onClick={() => navigate("deliveries")}>Open deliveries <ArrowRight size={15} /></Button>} />
+          {unassigned.length ? <div className="control-list">{unassigned.slice(0, 6).map(delivery => <div className="control-row" key={delivery.id}><span><b>{delivery.customer}</b><small>{delivery.id} · {delivery.status}</small></span><StatusPill status={delivery.status} /></div>)}</div> : <EmptyState text="No unassigned deliveries." />}
+        </section>
+        <section className="panel">
+          <PanelTitle eyebrow="People" title="Staff access" action={<Button variant="ghost" onClick={() => navigate("staff")}>Manage staff <ArrowRight size={15} /></Button>} />
+          <div className="control-list">{staff.slice(0, 6).map(member => <div className="control-row" key={member.id}><span><b>{member.name}</b><small>@{member.username || "no-username"}</small></span><span className={`access ${member.active ? "active" : "inactive"}`}>{member.active ? "Active" : "Inactive"}</span></div>)}</div>
+        </section>
+      </div>
+    </>
+  );
+}
+function DriverPreviewView({ deliveries, navigate }: { deliveries: Delivery[]; navigate: (view: ViewKey) => void }) {
+  const active = deliveries.find(delivery => !["Delivered", "Cancelled"].includes(delivery.status));
+  return (
+    <>
+      <PageHeading eyebrow="Owner preview / rider experience" title="Try as Driver" detail="Preview the mobile rider workflow without changing your Owner permissions or creating a driver session." action={<Button variant="secondary" onClick={() => navigate("driver")}><Truck size={15} /> Open driver workspace</Button>} />
+      <section className="driver-preview-banner"><div><span className="eyebrow">Read-only preview</span><h2>What a rider sees on the road</h2><p>Use this view to train staff and check the handover flow. GPS, scans, photos, and POD actions remain disabled here.</p></div><Truck size={38} /></section>
+      <div className="driver-preview-grid">
+        <section className="panel preview-phone"><div className="preview-phone-top"><span>NAZMI POD</span><b>Rider route</b></div><div className="preview-status"><span className="live-dot" /> Ready for today</div><h2>{active?.customer ?? "No assigned delivery"}</h2><p>{active?.address ?? "Create and assign a delivery to preview the destination."}</p><div className="preview-steps"><span className="done">1 <b>Start route</b></span><span>2 <b>Arrive at destination</b></span><span>3 <b>Submit POD</b></span></div><Button onClick={() => navigate("deliveries")}><PackageCheck size={15} /> View delivery register</Button></section>
+        <section className="panel"><PanelTitle eyebrow="Driver checklist" title="Every handover accounted for" /><div className="checklist"><span><Check size={15} /> Confirm challan and cartons</span><span><MapPin size={15} /> Share live GPS while driving</span><span><FileCheck2 size={15} /> Capture POD photos and remarks</span><span><ShieldCheck size={15} /> Submit for supervisor verification</span></div></section>
+      </div>
+    </>
+  );
+}
 function WorkspaceView({
   view,
   user,
@@ -3931,6 +4011,10 @@ function WorkspaceView({
     return <PodView deliveries={deliveries} user={user} lang={lang} />;
   if (view === "tracker")
     return <TrackerView deliveries={deliveries} user={user} lang={lang} />;
+  if (view === "operations")
+    return <OperationsCenterView deliveries={deliveries} staff={staff} navigate={navigate} lang={lang} />;
+  if (view === "driver-preview")
+    return <DriverPreviewView deliveries={deliveries} navigate={navigate} />;
   if (view === "settings") return <SettingsView lang={lang} />;
   if (view === "audit") return <AuditView lang={lang} />;
   return (
