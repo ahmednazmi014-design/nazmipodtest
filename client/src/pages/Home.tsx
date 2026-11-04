@@ -631,6 +631,16 @@ function Dashboard({
   const completion = summary?.cartons
     ? Math.round((summary.deliveredCartons / summary.cartons) * 100)
     : 0;
+  const unassigned = deliveries.filter(
+    delivery => !delivery.driver && !["Delivered", "Cancelled"].includes(delivery.status)
+  ).length;
+  const attention = deliveries.filter(delivery =>
+    ["Failed", "Partially Delivered"].includes(delivery.status)
+  ).length;
+  const scheduledToday = deliveries.filter(delivery => {
+    const today = new Date().toISOString().slice(0, 10);
+    return delivery.scheduledAt.slice(0, 10) === today;
+  }).length;
   return (
     <>
       <PageHeading
@@ -691,6 +701,19 @@ function Dashboard({
           tone="coral"
         />
       </div>
+      <section className="panel ops-pulse-panel">
+        <PanelTitle
+          eyebrow="Dispatch intelligence"
+          title="Operations pulse"
+          action={<span className="pulse-live"><i /> Live</span>}
+        />
+        <div className="ops-pulse-grid">
+          <div><span>Scheduled today</span><b>{scheduledToday}</b><small>planned stops</small></div>
+          <div><span>Needs assignment</span><b>{unassigned}</b><small>no rider or vehicle</small></div>
+          <div><span>Needs attention</span><b>{attention}</b><small>failed or partial</small></div>
+          <div><span>POD review</span><b>{summary?.pendingVerification ?? 0}</b><small>evidence waiting</small></div>
+        </div>
+      </section>
       <div className="split-grid">
         <section className="panel">
           <PanelTitle

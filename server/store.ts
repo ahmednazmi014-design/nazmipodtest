@@ -260,10 +260,8 @@ export async function initializeStore() {
       if (!remote) await saveSupabaseStore(memoryStore);
       return memoryStore;
     } catch (error) {
-      console.error(
-        "[Store] Supabase unavailable; using local fallback:",
-        error
-      );
+      console.error("[Store] Supabase storage initialization failed:", error);
+      throw error;
     }
   }
   memoryStore = readDiskStore();
