@@ -165,9 +165,11 @@ describe("secure auth bootstrap", () => {
     expect(bootstrapOwnerFromEnvironment()).toBe(true);
     expect(bootstrapOwnerFromEnvironment()).toBe(false);
     const store = readStore();
-    const added = store.users.find(item => item.username === "Ahmed")!;
+    const added = store.users.find(
+      item => item.username === "configured-username"
+    )!;
     expect(store.users).toHaveLength(2);
-    expect(added.name).toBe("Ahsan Ahmed");
+    expect(added.name).toBe("configured-owner-name");
     expect(added.email).toBe("");
     expect(added.role).toBe("Owner");
     expect(added.mustChangePassword).toBe(false);

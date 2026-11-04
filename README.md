@@ -16,7 +16,7 @@ NAZMI POD is a password-protected delivery operations workspace for Nazmi Packag
 The application uses a private Supabase row as its durable application store when both of these server-only variables are configured:
 
 ```text
-SUPABASE_URL=https://ahqisqsadtgifuzpygim.supabase.co
+SUPABASE_URL=https://oknmpelsuyhemaextbso.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<Supabase server-side service role key>
 ```
 

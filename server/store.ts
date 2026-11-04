@@ -390,13 +390,18 @@ export function bootstrapOwnerFromEnvironment() {
   const password = process.env.NAZMI_BOOTSTRAP_PASSWORD;
   if (!configuredUsername || !configuredName || !password) return false;
   return withStore(store => {
-    if (store.users.some(user => user.username?.toLowerCase() === "ahmed"))
+    if (
+      store.users.some(
+        user =>
+          user.username?.toLowerCase() === configuredUsername.toLowerCase()
+      )
+    )
       return false;
     const now = new Date().toISOString();
     const user: StoredUser = {
       id: randomUUID(),
-      name: "Ahsan Ahmed",
-      username: "Ahmed",
+      name: configuredName,
+      username: configuredUsername,
       email: "",
       phone: "",
       role: "Owner",

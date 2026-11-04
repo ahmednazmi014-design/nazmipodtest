@@ -37,7 +37,7 @@ The user asked for an improved invoice/POD PDF, delivery calendar, bulk delivery
 
 ## Release checklist
 
-1. Add `SUPABASE_SERVICE_ROLE_KEY` and, optionally, `SUPABASE_URL=https://ahqisqsadtgifuzpygim.supabase.co` to Render server environment variables; never add the key to the repository or client.
+1. Add `SUPABASE_SERVICE_ROLE_KEY` and, optionally, `SUPABASE_URL=https://oknmpelsuyhemaextbso.supabase.co` to Render server environment variables; never add the key to the repository or client.
 2. Run the feature branch in a safe environment, create one test delivery, restart/redeploy, and confirm `/api/health` reports `storage: "supabase"` and the record remains.
 3. Decide how any existing JSON production records should be imported before the first Supabase-backed release; do not silently discard them.
 4. Test the public `/track/:token` route, revoke/expiry behavior, ETA/timeline, customer confirmation/issues, rider destination map, PDF download, photo metadata, camera scan on a supported mobile browser, offline sync, and delivery time calculations.
