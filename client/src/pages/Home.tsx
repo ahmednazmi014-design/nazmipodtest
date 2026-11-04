@@ -634,19 +634,193 @@ function Dashboard({
   lang: Lang;
 }) {
   const t = ui[lang];
+  const copy =
+    lang === "UR"
+      ? {
+          planning: "ترسیل کی منصوبہ بندی",
+          nextSeven: "اگلے 7 دن",
+          localDates: "مقامی تاریخیں",
+          noRecords: "ابھی کوئی ڈیلیوری ریکارڈ نہیں۔ شیڈول یہاں ظاہر ہوگا۔",
+          actionRequired: "کارروائی درکار",
+          dispatchAttention: "ڈسپیچ کی توجہ",
+          deliveries: "ڈیلیوریز",
+          nothingNeeds: "فی الحال کوئی ڈسپیچ کارروائی درکار نہیں۔",
+          riderPerformance: "رائیڈر کارکردگی",
+          recentRuns: "حالیہ مکمل ڈیلیوریز",
+          last30: "گزشتہ 30 دن",
+          noRuns: "گزشتہ 30 دن میں کوئی ڈیلیوری مکمل نہیں ہوئی۔",
+          avgTrip: "اوسط سفر کا وقت",
+          avgStop: "اوسط اسٹاپ کا وقت",
+          validTrip: "درست آغاز اور اختتام کے وقت والے سفر",
+          validStop: "درست آمد اور اختتام کے وقت والے سفر",
+          missingTiming:
+            "وقت کا ڈیٹا موجود یا درست نہیں؛ اوسط نہیں نکالی جا سکتی۔",
+          rider: "رائیڈر",
+          count: "ڈیلیوریز",
+          tripShort: "اوسط سفر",
+          stopShort: "اوسط اسٹاپ",
+          noRiderRows: "رائیڈر کے حساب سے ریکارڈ دستیاب نہیں۔",
+          min: "منٹ",
+        }
+      : {
+          planning: "Dispatch planning",
+          nextSeven: "Next 7 days",
+          localDates: "Local dates",
+          noRecords:
+            "No delivery records yet. Scheduled volumes will appear when records are added.",
+          actionRequired: "Action required",
+          dispatchAttention: "Dispatch attention",
+          deliveries: "Deliveries",
+          nothingNeeds: "Nothing currently needs dispatch attention.",
+          riderPerformance: "Driver performance",
+          recentRuns: "Recent delivered runs",
+          last30: "Last 30 days",
+          noRuns: "No delivered runs in the last 30 days.",
+          avgTrip: "Average trip time",
+          avgStop: "Average stop dwell",
+          validTrip: "runs with valid start and completion timestamps",
+          validStop: "runs with valid arrival and completion timestamps",
+          missingTiming:
+            "Timing data is missing or invalid for these runs; no averages can be calculated.",
+          rider: "Rider",
+          count: "Delivered",
+          tripShort: "Avg trip",
+          stopShort: "Avg stop",
+          noRiderRows:
+            "No assigned-rider records are available for this period.",
+          min: "min",
+        };
+  const reasonLabel = (reason: string) =>
+    lang === "UR"
+      ? ({
+          Overdue: "تاخیر",
+          Unassigned: "رائیڈر مقرر نہیں",
+          "Failed delivery": "ناکام ڈیلیوری",
+          "Partial delivery": "جزوی ڈیلیوری",
+          "POD review": "POD جائزہ",
+        }[reason] ?? reason)
+      : reason;
   const completion = summary?.cartons
     ? Math.round((summary.deliveredCartons / summary.cartons) * 100)
     : 0;
-  const unassigned = deliveries.filter(
-    delivery => !delivery.driver && !["Delivered", "Cancelled"].includes(delivery.status)
+  const todayKey = localDateKey(new Date());
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const activeDeliveries = deliveries.filter(
+    d => !["Delivered", "Cancelled"].includes(d.status)
+  );
+  const unassigned = activeDeliveries.filter(d => !d.driver).length;
+  const attention = deliveries.filter(d =>
+    ["Failed", "Partially Delivered"].includes(d.status)
   ).length;
-  const attention = deliveries.filter(delivery =>
-    ["Failed", "Partially Delivered"].includes(delivery.status)
+  const scheduledToday = deliveries.filter(
+    d => d.status !== "Cancelled" && localDateKey(d.scheduledAt) === todayKey
   ).length;
-  const scheduledToday = deliveries.filter(delivery => {
-    const today = new Date().toISOString().slice(0, 10);
-    return delivery.scheduledAt.slice(0, 10) === today;
-  }).length;
+  const forecastDays = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(today);
+    date.setDate(date.getDate() + i);
+    const key = localDateKey(date);
+    return {
+      date,
+      key,
+      count: deliveries.filter(
+        d => d.status !== "Cancelled" && localDateKey(d.scheduledAt) === key
+      ).length,
+    };
+  });
+  const dateLabel = (date: Date) =>
+    new Intl.DateTimeFormat(lang === "UR" ? "ur-PK" : "en-PK", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    }).format(date);
+  const now = Date.now();
+  const attentionItems = deliveries
+    .map(delivery => {
+      const reasons: string[] = [];
+      const scheduled = new Date(delivery.scheduledAt).getTime();
+      if (
+        !Number.isNaN(scheduled) &&
+        scheduled < now &&
+        !["Delivered", "Cancelled", "Failed", "Partially Delivered"].includes(
+          delivery.status
+        )
+      )
+        reasons.push("Overdue");
+      if (
+        !delivery.driver &&
+        !["Delivered", "Cancelled"].includes(delivery.status)
+      )
+        reasons.push("Unassigned");
+      if (delivery.status === "Failed") reasons.push("Failed delivery");
+      if (delivery.status === "Partially Delivered")
+        reasons.push("Partial delivery");
+      if (
+        delivery.proofStatus === "Ready" &&
+        ["Delivered", "Partially Delivered"].includes(delivery.status)
+      )
+        reasons.push("POD review");
+      return { delivery, reasons };
+    })
+    .filter(item => item.reasons.length > 0)
+    .slice(0, 8);
+  const windowStart = now - 30 * 24 * 60 * 60 * 1000;
+  const recentDelivered = deliveries.filter(
+    d =>
+      d.status === "Delivered" &&
+      d.completedAt &&
+      new Date(d.completedAt).getTime() >= windowStart &&
+      new Date(d.completedAt).getTime() <= now
+  );
+  const validDuration = (start?: string | null, end?: string | null) => {
+    if (!start || !end) return null;
+    const a = new Date(start).getTime(),
+      b = new Date(end).getTime();
+    return Number.isFinite(a) && Number.isFinite(b) && b >= a
+      ? (b - a) / 60000
+      : null;
+  };
+  const tripTimes = recentDelivered
+    .map(d => validDuration(d.startedAt, d.completedAt))
+    .filter((n): n is number => n !== null);
+  const dwellTimes = recentDelivered
+    .map(d => validDuration(d.arrivedAt, d.completedAt))
+    .filter((n): n is number => n !== null);
+  const average = (values: number[]) =>
+    values.length
+      ? Math.round(values.reduce((sum, n) => sum + n, 0) / values.length)
+      : null;
+  const avgTrip = average(tripTimes),
+    avgDwell = average(dwellTimes);
+  const riderStats = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      delivered: number;
+      trip: number[];
+      stop: number[];
+    }
+  >();
+  for (const delivery of recentDelivered) {
+    if (!delivery.driver) continue;
+    const stats = riderStats.get(delivery.driver.id) ?? {
+      id: delivery.driver.id,
+      name: delivery.driver.name,
+      delivered: 0,
+      trip: [],
+      stop: [],
+    };
+    stats.delivered += 1;
+    const trip = validDuration(delivery.startedAt, delivery.completedAt);
+    const stop = validDuration(delivery.arrivedAt, delivery.completedAt);
+    if (trip !== null) stats.trip.push(trip);
+    if (stop !== null) stats.stop.push(stop);
+    riderStats.set(delivery.driver.id, stats);
+  }
+  const riderRows = [...riderStats.values()]
+    .sort((a, b) => b.delivered - a.delivered)
+    .slice(0, 5);
   return (
     <>
       <PageHeading
@@ -711,13 +885,33 @@ function Dashboard({
         <PanelTitle
           eyebrow="Dispatch intelligence"
           title="Operations pulse"
-          action={<span className="pulse-live"><i /> Live</span>}
+          action={
+            <span className="pulse-live">
+              <i /> Live
+            </span>
+          }
         />
         <div className="ops-pulse-grid">
-          <div><span>Scheduled today</span><b>{scheduledToday}</b><small>planned stops</small></div>
-          <div><span>Needs assignment</span><b>{unassigned}</b><small>no rider or vehicle</small></div>
-          <div><span>Needs attention</span><b>{attention}</b><small>failed or partial</small></div>
-          <div><span>POD review</span><b>{summary?.pendingVerification ?? 0}</b><small>evidence waiting</small></div>
+          <div>
+            <span>Scheduled today</span>
+            <b>{scheduledToday}</b>
+            <small>planned stops</small>
+          </div>
+          <div>
+            <span>Needs assignment</span>
+            <b>{unassigned}</b>
+            <small>no rider assigned</small>
+          </div>
+          <div>
+            <span>Needs attention</span>
+            <b>{attention}</b>
+            <small>failed or partial</small>
+          </div>
+          <div>
+            <span>POD review</span>
+            <b>{summary?.pendingVerification ?? 0}</b>
+            <small>evidence waiting</small>
+          </div>
         </div>
       </section>
       <div className="split-grid">
@@ -731,21 +925,21 @@ function Dashboard({
               </Button>
             }
           />
-          {deliveries.length === 0 ? (
-            <EmptyState
-              text={t.noRecords}
-              action={
-                canManage(user.role) ? (
-                  <Button onClick={() => navigate("deliveries")}>
-                    <Plus size={15} />
-                    Create first delivery
-                  </Button>
-                ) : undefined
-              }
-            />
+          {deliveries.filter(
+            d =>
+              d.status !== "Cancelled" &&
+              localDateKey(d.scheduledAt) === todayKey
+          ).length === 0 ? (
+            <EmptyState text="No deliveries scheduled today" />
           ) : (
             <DeliveryTable
-              deliveries={deliveries.slice(0, 6)}
+              deliveries={deliveries
+                .filter(
+                  d =>
+                    d.status !== "Cancelled" &&
+                    localDateKey(d.scheduledAt) === todayKey
+                )
+                .slice(0, 6)}
               onSelect={() => navigate("deliveries")}
             />
           )}
@@ -795,6 +989,135 @@ function Dashboard({
           </div>
         </section>
       </div>
+      <div className="dashboard-insight-grid">
+        <section className="panel dashboard-forecast">
+          <PanelTitle
+            eyebrow={copy.planning}
+            title={copy.nextSeven}
+            action={<span className="muted">{copy.localDates}</span>}
+          />
+          {deliveries.length === 0 ? (
+            <p className="dashboard-empty">{copy.noRecords}</p>
+          ) : (
+            <div className="forecast-list">
+              {forecastDays.map(({ date, key, count }) => (
+                <div className="forecast-day" key={key}>
+                  <span>{dateLabel(date)}</span>
+                  <div className="forecast-bar-track">
+                    <i
+                      style={{
+                        width: `${count ? Math.max(8, (count / Math.max(1, ...forecastDays.map(d => d.count))) * 100) : 0}%`,
+                      }}
+                    />
+                  </div>
+                  <b>{count}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+        <section className="panel dashboard-attention">
+          <PanelTitle
+            eyebrow={copy.actionRequired}
+            title={copy.dispatchAttention}
+            action={
+              <Button variant="ghost" onClick={() => navigate("deliveries")}>
+                {copy.deliveries} <ArrowRight size={15} />
+              </Button>
+            }
+          />
+          {!attentionItems.length ? (
+            <p className="dashboard-empty">{copy.nothingNeeds}</p>
+          ) : (
+            <div className="attention-list">
+              {attentionItems.map(({ delivery, reasons }) => (
+                <button
+                  className="attention-item"
+                  key={delivery.id}
+                  onClick={() =>
+                    navigate(
+                      reasons.includes("POD review") ? "pod" : "deliveries"
+                    )
+                  }
+                >
+                  <span>
+                    <b>{delivery.customer}</b>
+                    <small>
+                      {delivery.reference || delivery.challan || delivery.id}
+                    </small>
+                  </span>
+                  <span className="attention-reasons">
+                    {reasons.map(reason => (
+                      <i key={reason}>{reasonLabel(reason)}</i>
+                    ))}
+                  </span>
+                  <ArrowRight size={15} />
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+      <section className="panel driver-performance">
+        <PanelTitle
+          eyebrow={copy.riderPerformance}
+          title={copy.recentRuns}
+          action={<span className="muted">{copy.last30}</span>}
+        />
+        {recentDelivered.length === 0 ? (
+          <p className="dashboard-empty">{copy.noRuns}</p>
+        ) : (
+          <>
+            <div className="performance-metrics">
+              <div>
+                <small>{copy.avgTrip}</small>
+                <b>{avgTrip === null ? "—" : `${avgTrip} ${copy.min}`}</b>
+                <span>
+                  {tripTimes.length} {copy.validTrip}
+                </span>
+              </div>
+              <div>
+                <small>{copy.avgStop}</small>
+                <b>{avgDwell === null ? "—" : `${avgDwell} ${copy.min}`}</b>
+                <span>
+                  {dwellTimes.length} {copy.validStop}
+                </span>
+              </div>
+            </div>
+            {riderRows.length ? (
+              <div className="driver-stats-list">
+                <div className="driver-stats-row header">
+                  <span>{copy.rider}</span>
+                  <span>{copy.count}</span>
+                  <span>{copy.tripShort}</span>
+                  <span>{copy.stopShort}</span>
+                </div>
+                {riderRows.map(row => (
+                  <div className="driver-stats-row" key={row.id}>
+                    <b>{row.name}</b>
+                    <span>{row.delivered}</span>
+                    <span>
+                      {average(row.trip) === null
+                        ? "—"
+                        : `${average(row.trip)} ${copy.min}`}
+                    </span>
+                    <span>
+                      {average(row.stop) === null
+                        ? "—"
+                        : `${average(row.stop)} ${copy.min}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="dashboard-empty">{copy.noRiderRows}</p>
+            )}
+            {avgTrip === null && avgDwell === null && (
+              <p className="dashboard-empty">{copy.missingTiming}</p>
+            )}
+          </>
+        )}
+      </section>
     </>
   );
 }
@@ -3922,45 +4245,197 @@ function OperationsCenterView({
   navigate: (view: ViewKey) => void;
   lang: Lang;
 }) {
-  const active = deliveries.filter(d => ["Out for Delivery", "Arrived"].includes(d.status));
-  const unassigned = deliveries.filter(d => !d.assignedDriverId && !["Delivered", "Cancelled"].includes(d.status));
-  const drivers = staff.filter(member => member.role === "Driver" && member.active);
+  const active = deliveries.filter(d =>
+    ["Out for Delivery", "Arrived"].includes(d.status)
+  );
+  const unassigned = deliveries.filter(
+    d => !d.assignedDriverId && !["Delivered", "Cancelled"].includes(d.status)
+  );
+  const drivers = staff.filter(
+    member => member.role === "Driver" && member.active
+  );
   return (
     <>
       <PageHeading
         eyebrow="Owner control / command center"
         title={lang === "UR" ? "آپریشنز سینٹر" : "Operations Center"}
         detail="A single control room for staffing, route readiness, active deliveries, and exceptions."
-        action={<Button onClick={() => navigate("settings")}><Settings2 size={15} /> Owner settings</Button>}
+        action={
+          <Button onClick={() => navigate("settings")}>
+            <Settings2 size={15} /> Owner settings
+          </Button>
+        }
       />
       <div className="metric-grid">
-        <Metric label="Active riders" value={drivers.length} hint="enabled Driver accounts" icon={<Truck />} tone="blue" />
-        <Metric label="On route now" value={active.length} hint="live delivery movements" icon={<MapPin />} tone="amber" />
-        <Metric label="Unassigned" value={unassigned.length} hint="needs dispatch action" icon={<UsersRound />} tone="coral" />
-        <Metric label="Total staff" value={staff.length} hint="all access roles" icon={<ShieldCheck />} />
+        <Metric
+          label="Active riders"
+          value={drivers.length}
+          hint="enabled Driver accounts"
+          icon={<Truck />}
+          tone="blue"
+        />
+        <Metric
+          label="On route now"
+          value={active.length}
+          hint="live delivery movements"
+          icon={<MapPin />}
+          tone="amber"
+        />
+        <Metric
+          label="Unassigned"
+          value={unassigned.length}
+          hint="needs dispatch action"
+          icon={<UsersRound />}
+          tone="coral"
+        />
+        <Metric
+          label="Total staff"
+          value={staff.length}
+          hint="all access roles"
+          icon={<ShieldCheck />}
+        />
       </div>
       <div className="split-grid owner-control-grid">
         <section className="panel">
-          <PanelTitle eyebrow="Dispatch readiness" title="Needs action" action={<Button variant="ghost" onClick={() => navigate("deliveries")}>Open deliveries <ArrowRight size={15} /></Button>} />
-          {unassigned.length ? <div className="control-list">{unassigned.slice(0, 6).map(delivery => <div className="control-row" key={delivery.id}><span><b>{delivery.customer}</b><small>{delivery.id} · {delivery.status}</small></span><StatusPill status={delivery.status} /></div>)}</div> : <EmptyState text="No unassigned deliveries." />}
+          <PanelTitle
+            eyebrow="Dispatch readiness"
+            title="Needs action"
+            action={
+              <Button variant="ghost" onClick={() => navigate("deliveries")}>
+                Open deliveries <ArrowRight size={15} />
+              </Button>
+            }
+          />
+          {unassigned.length ? (
+            <div className="control-list">
+              {unassigned.slice(0, 6).map(delivery => (
+                <div className="control-row" key={delivery.id}>
+                  <span>
+                    <b>{delivery.customer}</b>
+                    <small>
+                      {delivery.id} · {delivery.status}
+                    </small>
+                  </span>
+                  <StatusPill status={delivery.status} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="No unassigned deliveries." />
+          )}
         </section>
         <section className="panel">
-          <PanelTitle eyebrow="People" title="Staff access" action={<Button variant="ghost" onClick={() => navigate("staff")}>Manage staff <ArrowRight size={15} /></Button>} />
-          <div className="control-list">{staff.slice(0, 6).map(member => <div className="control-row" key={member.id}><span><b>{member.name}</b><small>@{member.username || "no-username"}</small></span><span className={`access ${member.active ? "active" : "inactive"}`}>{member.active ? "Active" : "Inactive"}</span></div>)}</div>
+          <PanelTitle
+            eyebrow="People"
+            title="Staff access"
+            action={
+              <Button variant="ghost" onClick={() => navigate("staff")}>
+                Manage staff <ArrowRight size={15} />
+              </Button>
+            }
+          />
+          <div className="control-list">
+            {staff.slice(0, 6).map(member => (
+              <div className="control-row" key={member.id}>
+                <span>
+                  <b>{member.name}</b>
+                  <small>@{member.username || "no-username"}</small>
+                </span>
+                <span
+                  className={`access ${member.active ? "active" : "inactive"}`}
+                >
+                  {member.active ? "Active" : "Inactive"}
+                </span>
+              </div>
+            ))}
+          </div>
         </section>
       </div>
     </>
   );
 }
-function DriverPreviewView({ deliveries, navigate }: { deliveries: Delivery[]; navigate: (view: ViewKey) => void }) {
-  const active = deliveries.find(delivery => !["Delivered", "Cancelled"].includes(delivery.status));
+function DriverPreviewView({
+  deliveries,
+  navigate,
+}: {
+  deliveries: Delivery[];
+  navigate: (view: ViewKey) => void;
+}) {
+  const active = deliveries.find(
+    delivery => !["Delivered", "Cancelled"].includes(delivery.status)
+  );
   return (
     <>
-      <PageHeading eyebrow="Owner preview / rider experience" title="Try as Driver" detail="Preview the mobile rider workflow without changing your Owner permissions or creating a driver session." action={<Button variant="secondary" onClick={() => navigate("driver")}><Truck size={15} /> Open driver workspace</Button>} />
-      <section className="driver-preview-banner"><div><span className="eyebrow">Read-only preview</span><h2>What a rider sees on the road</h2><p>Use this view to train staff and check the handover flow. GPS, scans, photos, and POD actions remain disabled here.</p></div><Truck size={38} /></section>
+      <PageHeading
+        eyebrow="Owner preview / rider experience"
+        title="Try as Driver"
+        detail="Preview the mobile rider workflow without changing your Owner permissions or creating a driver session."
+        action={
+          <Button variant="secondary" onClick={() => navigate("driver")}>
+            <Truck size={15} /> Open driver workspace
+          </Button>
+        }
+      />
+      <section className="driver-preview-banner">
+        <div>
+          <span className="eyebrow">Read-only preview</span>
+          <h2>What a rider sees on the road</h2>
+          <p>
+            Use this view to train staff and check the handover flow. GPS,
+            scans, photos, and POD actions remain disabled here.
+          </p>
+        </div>
+        <Truck size={38} />
+      </section>
       <div className="driver-preview-grid">
-        <section className="panel preview-phone"><div className="preview-phone-top"><span>NAZMI POD</span><b>Rider route</b></div><div className="preview-status"><span className="live-dot" /> Ready for today</div><h2>{active?.customer ?? "No assigned delivery"}</h2><p>{active?.address ?? "Create and assign a delivery to preview the destination."}</p><div className="preview-steps"><span className="done">1 <b>Start route</b></span><span>2 <b>Arrive at destination</b></span><span>3 <b>Submit POD</b></span></div><Button onClick={() => navigate("deliveries")}><PackageCheck size={15} /> View delivery register</Button></section>
-        <section className="panel"><PanelTitle eyebrow="Driver checklist" title="Every handover accounted for" /><div className="checklist"><span><Check size={15} /> Confirm challan and cartons</span><span><MapPin size={15} /> Share live GPS while driving</span><span><FileCheck2 size={15} /> Capture POD photos and remarks</span><span><ShieldCheck size={15} /> Submit for supervisor verification</span></div></section>
+        <section className="panel preview-phone">
+          <div className="preview-phone-top">
+            <span>NAZMI POD</span>
+            <b>Rider route</b>
+          </div>
+          <div className="preview-status">
+            <span className="live-dot" /> Ready for today
+          </div>
+          <h2>{active?.customer ?? "No assigned delivery"}</h2>
+          <p>
+            {active?.address ??
+              "Create and assign a delivery to preview the destination."}
+          </p>
+          <div className="preview-steps">
+            <span className="done">
+              1 <b>Start route</b>
+            </span>
+            <span>
+              2 <b>Arrive at destination</b>
+            </span>
+            <span>
+              3 <b>Submit POD</b>
+            </span>
+          </div>
+          <Button onClick={() => navigate("deliveries")}>
+            <PackageCheck size={15} /> View delivery register
+          </Button>
+        </section>
+        <section className="panel">
+          <PanelTitle
+            eyebrow="Driver checklist"
+            title="Every handover accounted for"
+          />
+          <div className="checklist">
+            <span>
+              <Check size={15} /> Confirm challan and cartons
+            </span>
+            <span>
+              <MapPin size={15} /> Share live GPS while driving
+            </span>
+            <span>
+              <FileCheck2 size={15} /> Capture POD photos and remarks
+            </span>
+            <span>
+              <ShieldCheck size={15} /> Submit for supervisor verification
+            </span>
+          </div>
+        </section>
       </div>
     </>
   );
@@ -4012,7 +4487,14 @@ function WorkspaceView({
   if (view === "tracker")
     return <TrackerView deliveries={deliveries} user={user} lang={lang} />;
   if (view === "operations")
-    return <OperationsCenterView deliveries={deliveries} staff={staff} navigate={navigate} lang={lang} />;
+    return (
+      <OperationsCenterView
+        deliveries={deliveries}
+        staff={staff}
+        navigate={navigate}
+        lang={lang}
+      />
+    );
   if (view === "driver-preview")
     return <DriverPreviewView deliveries={deliveries} navigate={navigate} />;
   if (view === "settings") return <SettingsView lang={lang} />;
