@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createHash } from "node:crypto";
 import express from "express";
 import { createServer } from "http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -58,6 +59,37 @@ async function startServer() {
     res.set({
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${delivery.id}.pdf"`,
+      "Cache-Control": "no-store",
+    });
+    return res.send(pdf);
+  });
+  app.get("/api/customer-pod/:token.pdf", (req, res) => {
+    const token = req.params.token;
+    const store = readStore();
+    const hash = createHash("sha256").update(token).digest("hex");
+    const tracking = (store.trackingTokens ?? []).find(
+      item =>
+        item.hash === hash &&
+        !item.revokedAt &&
+        new Date(item.expiresAt).getTime() > Date.now()
+    );
+    if (!tracking)
+      return res.status(404).json({ error: "Tracking link unavailable" });
+    const delivery = findDelivery(tracking.deliveryId, store);
+    if (!delivery) return res.status(404).json({ error: "Delivery not found" });
+    if (
+      !["Delivered", "Partially Delivered", "Failed"].includes(delivery.status)
+    )
+      return res
+        .status(409)
+        .json({ error: "The delivery PDF is available after completion" });
+    const driver = delivery.assignedDriverId
+      ? findUserById(delivery.assignedDriverId, store)
+      : undefined;
+    const pdf = createPodPdf(delivery, driver, store);
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${delivery.id}-customer-pod.pdf"`,
       "Cache-Control": "no-store",
     });
     return res.send(pdf);

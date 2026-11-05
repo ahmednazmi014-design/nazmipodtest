@@ -64,6 +64,39 @@ const passwordSchema = z
   .string()
   .min(8, "Password must be at least 8 characters")
   .max(128);
+const customerProofPhotoSchema = z
+  .string()
+  .regex(/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/i)
+  .refine(value => value.length <= 1_340_000, "Proof photo is too large.");
+
+function notifyOperations(
+  store: ReturnType<typeof readStore>,
+  deliveryId: string,
+  type: string,
+  message: string
+) {
+  store.notifications ??= [];
+  for (const user of store.users.filter(
+    item =>
+      item.active &&
+      [
+        "Owner",
+        "Director",
+        "Dispatch Manager",
+        "Dispatch Staff",
+        "Delivery Supervisor",
+      ].includes(item.role)
+  ))
+    store.notifications.unshift({
+      id: randomUUID(),
+      userId: user.id,
+      deliveryId,
+      type,
+      message,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+    });
+}
 
 function requireRole(user: { role: Role }, allowed: Role[]) {
   if (!allowed.includes(user.role))
@@ -1435,6 +1468,10 @@ export const appRouter = router({
               }
             : null,
           updatedAt: d.updatedAt,
+          customerPdfAvailable:
+            terminalDeliveryStatuses.has(d.status) &&
+            d.proofStatus !== "Missing",
+          driverProofPhotoCount: d.photos.length,
           gps:
             live && d.gps
               ? { lat: d.gps.lat, lng: d.gps.lng, recordedAt: d.gps.recordedAt }
@@ -1481,6 +1518,14 @@ export const appRouter = router({
             createdAt: new Date().toISOString(),
           };
           store.customerConfirmations.unshift(confirmation);
+          notifyOperations(
+            store,
+            delivery.id,
+            input.received ? "customer_confirmed" : "customer_issue",
+            input.received
+              ? `Customer confirmed receipt for ${delivery.id}`
+              : `Customer reported a problem for ${delivery.id}`
+          );
           addAudit(store, {
             action: "customer_confirmation",
             actorId: null,
@@ -1506,6 +1551,7 @@ export const appRouter = router({
           ]),
           message: z.string().min(2).max(1000),
           contact: z.string().max(160).optional(),
+          proofPhotos: z.array(customerProofPhotoSchema).max(3).optional(),
         })
       )
       .mutation(({ input }) =>
@@ -1536,10 +1582,17 @@ export const appRouter = router({
             issue: input.issue,
             message: input.message.trim(),
             contact: input.contact?.trim() ?? "",
+            proofPhotos: input.proofPhotos ?? [],
             createdAt: new Date().toISOString(),
             resolvedAt: null,
           };
           store.customerIssues.unshift(issue);
+          notifyOperations(
+            store,
+            delivery.id,
+            "customer_issue",
+            `Customer issue reported for ${delivery.id}: ${input.issue}`
+          );
           addAudit(store, {
             action: "customer_issue_reported",
             actorId: null,

@@ -498,6 +498,7 @@ export function createPodPdf(
     metadata?: StoredDelivery["photoMetadata"] extends (infer T)[] | undefined
       ? T
       : never;
+    source: "driver" | "customer";
   }[] = [];
   for (const [index, value] of (Array.isArray(delivery.photos)
     ? delivery.photos
@@ -508,7 +509,31 @@ export function createPodPdf(
     if (!bytes) continue;
     const dim = jpegDimensions(bytes);
     if (dim)
-      photos.push({ bytes, ...dim, metadata: delivery.photoMetadata?.[index] });
+      photos.push({
+        bytes,
+        ...dim,
+        metadata: delivery.photoMetadata?.[index],
+        source: "driver",
+      });
+  }
+  for (const issue of (store.customerIssues ?? [])
+    .filter(item => item.deliveryId === delivery.id)
+    .slice(0, 3)) {
+    for (const value of issue.proofPhotos ?? []) {
+      if (photos.length >= MAX_PHOTOS + 3) break;
+      const bytes = safeJpegBytes(value);
+      const dim = bytes && jpegDimensions(bytes);
+      if (bytes && dim)
+        photos.push({
+          bytes,
+          ...dim,
+          metadata: {
+            capturedAt: issue.createdAt,
+            note: `Customer issue proof · ${issue.issue}`,
+          },
+          source: "customer",
+        });
+    }
   }
   photos.forEach((image, index) => {
     pages.push({ commands: [], image });
@@ -516,7 +541,7 @@ export function createPodPdf(
     rect(0, PAGE_HEIGHT, PAGE_WIDTH, 78, C.navy);
     txt(company, MARGIN, PAGE_HEIGHT - 24, 12, true, C.white);
     txt(
-      "POD PHOTO EVIDENCE",
+      image.source === "customer" ? "CUSTOMER ISSUE PROOF" : "POD PHOTO EVIDENCE",
       MARGIN,
       PAGE_HEIGHT - 47,
       10,

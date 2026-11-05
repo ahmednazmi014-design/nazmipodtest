@@ -84,6 +84,8 @@ type ViewKey =
   | "driver"
   | "driver-preview"
   | "operations"
+  | "reports"
+  | "fleet"
   | "settings"
   | "audit";
 type User = {
@@ -161,6 +163,8 @@ const ui = {
     driver: "My route",
     driverPreview: "Try as Driver",
     operations: "Operations center",
+    reports: "Reports & exports",
+    fleet: "Fleet & riders",
     signOut: "Sign out",
     newDelivery: "New delivery",
     search: "Search deliveries",
@@ -236,6 +240,8 @@ const ui = {
     driver: "میرا روٹ",
     driverPreview: "ڈرائیور پیش نظارہ",
     operations: "آپریشنز سینٹر",
+    reports: "رپورٹس اور ایکسپورٹس",
+    fleet: "فلیٹ اور رائیڈرز",
     signOut: "سائن آؤٹ",
     newDelivery: "نئی ڈیلیوری",
     search: "ڈیلیوری تلاش کریں",
@@ -2078,6 +2084,19 @@ function DeliveryDrawer({
                   }
                 >
                   Copy link
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const message = `Hello ${delivery.customer}, your NAZMI POD delivery ${delivery.id} can be tracked here: ${trackingLink}`;
+                    const phone = delivery.contact.replace(/[^\d+]/g, "");
+                    const target = phone
+                      ? `https://wa.me/${phone.replace(/^\+/, "")}?text=${encodeURIComponent(message)}`
+                      : `https://wa.me/?text=${encodeURIComponent(message)}`;
+                    window.open(target, "_blank", "noopener,noreferrer");
+                  }}
+                >
+                  WhatsApp draft
                 </Button>
                 <Button
                   variant="danger"
@@ -4061,6 +4080,18 @@ export default function Home() {
                     label={t.driverPreview}
                     onClick={() => navigate("driver-preview")}
                   />
+                  <NavButton
+                    active={view === "reports"}
+                    icon={<BarChart3 />}
+                    label={t.reports}
+                    onClick={() => navigate("reports")}
+                  />
+                  <NavButton
+                    active={view === "fleet"}
+                    icon={<CalendarDays />}
+                    label={t.fleet}
+                    onClick={() => navigate("fleet")}
+                  />
                 </>
               )}
               {["Owner", "Director"].includes(user.role) && (
@@ -4440,6 +4471,257 @@ function DriverPreviewView({
     </>
   );
 }
+function ReportsView({
+  deliveries,
+  navigate,
+  lang,
+}: {
+  deliveries: Delivery[];
+  navigate: (view: ViewKey) => void;
+  lang: Lang;
+}) {
+  const delivered = deliveries.filter(d => d.status === "Delivered").length;
+  const partial = deliveries.filter(
+    d => d.status === "Partially Delivered"
+  ).length;
+  const failed = deliveries.filter(d => d.status === "Failed").length;
+  const cartons = deliveries.reduce(
+    (sum, delivery) => sum + delivery.cartons,
+    0
+  );
+  const deliveredCartons = deliveries.reduce(
+    (sum, delivery) => sum + delivery.deliveredCartons,
+    0
+  );
+  const exportReport = () => {
+    const rows = [
+      [
+        "Delivery ID",
+        "Customer",
+        "Status",
+        "Driver",
+        "Cartons",
+        "Delivered",
+        "POD",
+      ],
+      ...deliveries.map(d => [
+        d.id,
+        d.customer,
+        d.status,
+        d.driver?.name ?? "Unassigned",
+        String(d.cartons),
+        String(d.deliveredCartons),
+        d.proofStatus,
+      ]),
+    ];
+    const csv = rows.map(row => row.map(csvEscape).join(",")).join("\n");
+    const url = URL.createObjectURL(
+      new Blob([csv], { type: "text/csv;charset=utf-8" })
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `nazmi-delivery-report-${localDateKey(new Date())}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <>
+      <PageHeading
+        eyebrow="Owner reporting / exports"
+        title={lang === "UR" ? "رپورٹس اور ایکسپورٹس" : "Reports & Exports"}
+        detail="Track delivery outcomes, carton movement, POD completion, and download a clean operational report."
+        action={
+          <Button onClick={exportReport}>
+            <Download size={15} /> Export CSV
+          </Button>
+        }
+      />
+      <div className="metric-grid">
+        <Metric
+          label="Completion rate"
+          value={cartons ? Math.round((deliveredCartons / cartons) * 100) : 0}
+          hint="percent of cartons delivered"
+          icon={<BarChart3 />}
+          tone="blue"
+        />
+        <Metric
+          label="Delivered orders"
+          value={delivered}
+          hint="fully completed"
+          icon={<Check />}
+        />
+        <Metric
+          label="Partial orders"
+          value={partial}
+          hint="needs reconciliation"
+          icon={<AlertTriangle />}
+          tone="amber"
+        />
+        <Metric
+          label="Failed orders"
+          value={failed}
+          hint="needs follow-up"
+          icon={<X />}
+          tone="coral"
+        />
+      </div>
+      <section className="panel report-breakdown">
+        <PanelTitle
+          eyebrow="Quality control"
+          title="Delivery outcome breakdown"
+        />
+        <div className="outcome-bars">
+          <span>
+            <b>Delivered</b>
+            <i>
+              <em
+                style={{
+                  width: `${deliveries.length ? (delivered / deliveries.length) * 100 : 0}%`,
+                }}
+              />
+            </i>
+            <strong>{delivered}</strong>
+          </span>
+          <span>
+            <b>Partial</b>
+            <i>
+              <em
+                className="amber-bar"
+                style={{
+                  width: `${deliveries.length ? (partial / deliveries.length) * 100 : 0}%`,
+                }}
+              />
+            </i>
+            <strong>{partial}</strong>
+          </span>
+          <span>
+            <b>Failed</b>
+            <i>
+              <em
+                className="red-bar"
+                style={{
+                  width: `${deliveries.length ? (failed / deliveries.length) * 100 : 0}%`,
+                }}
+              />
+            </i>
+            <strong>{failed}</strong>
+          </span>
+        </div>
+        <div className="report-actions">
+          <Button variant="secondary" onClick={() => navigate("pod")}>
+            <FileCheck2 size={15} /> Review POD queue
+          </Button>
+          <Button variant="ghost" onClick={() => navigate("audit")}>
+            <ShieldCheck size={15} /> Open audit log
+          </Button>
+        </div>
+      </section>
+    </>
+  );
+}
+function FleetView({
+  staff,
+  deliveries,
+  navigate,
+}: {
+  staff: User[];
+  deliveries: Delivery[];
+  navigate: (view: ViewKey) => void;
+}) {
+  const riders = staff.filter(member => member.role === "Driver");
+  return (
+    <>
+      <PageHeading
+        eyebrow="Owner resources / field team"
+        title="Fleet & Riders"
+        detail="See rider availability, assigned workload, and vehicle information in one place."
+        action={
+          <Button onClick={() => navigate("staff")}>
+            <UserPlus size={15} /> Add rider
+          </Button>
+        }
+      />
+      <div className="metric-grid">
+        <Metric
+          label="Active riders"
+          value={riders.filter(rider => rider.active).length}
+          hint="ready for dispatch"
+          icon={<Truck />}
+          tone="blue"
+        />
+        <Metric
+          label="Rider accounts"
+          value={riders.length}
+          hint="all Driver roles"
+          icon={<UsersRound />}
+        />
+        <Metric
+          label="Assigned routes"
+          value={
+            deliveries.filter(delivery => delivery.assignedDriverId).length
+          }
+          hint="delivery records"
+          icon={<MapPin />}
+          tone="amber"
+        />
+        <Metric
+          label="Unassigned routes"
+          value={
+            deliveries.filter(
+              delivery =>
+                !delivery.assignedDriverId &&
+                !["Delivered", "Cancelled"].includes(delivery.status)
+            ).length
+          }
+          hint="dispatch queue"
+          icon={<AlertTriangle />}
+          tone="coral"
+        />
+      </div>
+      <section className="panel fleet-list-panel">
+        <PanelTitle
+          eyebrow="Rider roster"
+          title="Team readiness"
+          action={
+            <Button variant="ghost" onClick={() => navigate("staff")}>
+              Manage access <ArrowRight size={15} />
+            </Button>
+          }
+        />
+        <div className="fleet-list">
+          {riders.length ? (
+            riders.map(rider => {
+              const load = deliveries.filter(
+                delivery =>
+                  delivery.assignedDriverId === rider.id &&
+                  !["Delivered", "Cancelled"].includes(delivery.status)
+              ).length;
+              return (
+                <div className="fleet-row" key={rider.id}>
+                  <Avatar name={rider.name} />
+                  <span>
+                    <b>{rider.name}</b>
+                    <small>
+                      {rider.phone || "No phone"} · {load} active route
+                      {load === 1 ? "" : "s"}
+                    </small>
+                  </span>
+                  <span
+                    className={`access ${rider.active ? "active" : "inactive"}`}
+                  >
+                    {rider.active ? "Available" : "Inactive"}
+                  </span>
+                </div>
+              );
+            })
+          ) : (
+            <EmptyState text="No rider accounts yet." />
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
 function WorkspaceView({
   view,
   user,
@@ -4497,6 +4779,14 @@ function WorkspaceView({
     );
   if (view === "driver-preview")
     return <DriverPreviewView deliveries={deliveries} navigate={navigate} />;
+  if (view === "reports")
+    return (
+      <ReportsView deliveries={deliveries} navigate={navigate} lang={lang} />
+    );
+  if (view === "fleet")
+    return (
+      <FleetView staff={staff} deliveries={deliveries} navigate={navigate} />
+    );
   if (view === "settings") return <SettingsView lang={lang} />;
   if (view === "audit") return <AuditView lang={lang} />;
   return (
