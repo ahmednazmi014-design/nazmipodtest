@@ -132,6 +132,7 @@ export type CustomerIssue = {
   issue: string;
   message: string;
   contact: string;
+  proofPhotos: string[];
   createdAt: string;
   resolvedAt: string | null;
 };
@@ -217,7 +218,10 @@ function normalizeStore(parsed: Store): Store {
     notifications: parsed.notifications ?? [],
     trackingTokens: parsed.trackingTokens ?? [],
     customerConfirmations: parsed.customerConfirmations ?? [],
-    customerIssues: parsed.customerIssues ?? [],
+    customerIssues: (parsed.customerIssues ?? []).map(issue => ({
+      ...issue,
+      proofPhotos: issue.proofPhotos ?? [],
+    })),
     deliveries: (parsed.deliveries ?? []).map(delivery => ({
       ...delivery,
       photos: delivery.photos ?? [],

@@ -197,6 +197,7 @@ export function createPodPdf(
       lng?: number | null;
       note?: string;
     };
+    source: "driver" | "customer";
   }[] = [];
   for (const [index, value] of (Array.isArray(delivery.photos)
     ? delivery.photos
@@ -211,7 +212,27 @@ export function createPodPdf(
         bytes,
         ...dimensions,
         metadata: delivery.photoMetadata?.[index],
+        source: "driver",
       });
+  }
+  for (const issue of (store.customerIssues ?? [])
+    .filter(item => item.deliveryId === delivery.id)
+    .slice(0, 3)) {
+    for (const value of issue.proofPhotos ?? []) {
+      if (photos.length >= MAX_PHOTOS + 3) break;
+      const bytes = safeJpegBytes(value);
+      const dimensions = bytes && jpegDimensions(bytes);
+      if (bytes && dimensions)
+        photos.push({
+          bytes,
+          ...dimensions,
+          metadata: {
+            capturedAt: issue.createdAt,
+            note: `Customer issue proof · ${issue.issue}`,
+          },
+          source: "customer",
+        });
+    }
   }
   for (const [index, image] of photos.entries()) {
     addPage();
@@ -224,7 +245,7 @@ export function createPodPdf(
     pages
       .at(-1)!
       .commands.push(
-        `0.035 0.20 0.15 rg BT /F2 14 Tf ${MARGIN} ${PAGE_HEIGHT - MARGIN} Td (POD PHOTO EVIDENCE) Tj ET`,
+        `0.035 0.20 0.15 rg BT /F2 14 Tf ${MARGIN} ${PAGE_HEIGHT - MARGIN} Td (${image.source === "customer" ? "CUSTOMER ISSUE PROOF" : "POD PHOTO EVIDENCE"}) Tj ET`,
         `0.10 0.15 0.14 rg BT /F1 9 Tf ${MARGIN} ${PAGE_HEIGHT - MARGIN - 20} Td (${escapePdfText(metaLines[0])}) Tj ET`,
         `0.10 0.15 0.14 rg BT /F1 9 Tf ${MARGIN} ${PAGE_HEIGHT - MARGIN - 34} Td (${escapePdfText(metaLines[1])}) Tj ET`
       );

@@ -1784,6 +1784,19 @@ function DeliveryDrawer({
                   Copy link
                 </Button>
                 <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const message = `Hello ${delivery.customer}, your NAZMI POD delivery ${delivery.id} can be tracked here: ${trackingLink}`;
+                    const phone = delivery.contact.replace(/[^\d+]/g, "");
+                    const target = phone
+                      ? `https://wa.me/${phone.replace(/^\+/, "")}?text=${encodeURIComponent(message)}`
+                      : `https://wa.me/?text=${encodeURIComponent(message)}`;
+                    window.open(target, "_blank", "noopener,noreferrer");
+                  }}
+                >
+                  WhatsApp draft
+                </Button>
+                <Button
                   variant="danger"
                   onClick={() => revokeLink.mutate({ deliveryId: delivery.id })}
                 >

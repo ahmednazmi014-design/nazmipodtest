@@ -9,9 +9,28 @@ import {
   RefreshCw,
   Send,
   Truck,
+  Upload,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+
+async function compressCustomerPhoto(file: File): Promise<string> {
+  if (!file.type.startsWith("image/"))
+    throw new Error("Please choose an image file.");
+  const image = await createImageBitmap(file);
+  const scale = Math.min(1, 1400 / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare photo.");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  image.close();
+  const value = canvas.toDataURL("image/jpeg", 0.78);
+  if (value.length > 1_340_000) throw new Error("Photo is too large.");
+  return value;
+}
 
 export default function PublicTracking({ token }: { token: string }) {
   const [urdu, setUrdu] = useState(
@@ -22,6 +41,7 @@ export default function PublicTracking({ token }: { token: string }) {
   const [issue, setIssue] = useState("Missing cartons");
   const [issueMessage, setIssueMessage] = useState("");
   const [contact, setContact] = useState("");
+  const [proofPhotos, setProofPhotos] = useState<string[]>([]);
   const query = trpc.deliveries.getPublicTracking.useQuery(
     { token },
     { refetchInterval: 15000, retry: false }
@@ -40,6 +60,7 @@ export default function PublicTracking({ token }: { token: string }) {
       toast.success(urdu ? "رپورٹ بھیج دی گئی" : "Issue sent to dispatch");
       setIssueMessage("");
       setContact("");
+      setProofPhotos([]);
     },
     onError: error => toast.error(error.message),
   });
@@ -82,6 +103,7 @@ export default function PublicTracking({ token }: { token: string }) {
       return toast.error(urdu ? "نام درج کریں" : "Enter your name first");
     confirm.mutate({ token, customerName, received, notes: confirmNotes });
   };
+  const customerPdfUrl = `/api/customer-pod/${encodeURIComponent(token)}.pdf`;
   return (
     <main
       className={`customer-track-page${urdu ? " rtl" : ""}`}
@@ -220,6 +242,17 @@ export default function PublicTracking({ token }: { token: string }) {
                 </a>
               )}
             </div>
+            {data.customerPdfAvailable && (
+              <a
+                className="button secondary customer-pdf-button"
+                href={customerPdfUrl}
+              >
+                <Download size={15} />
+                {urdu
+                  ? "POD / انوائس PDF ڈاؤن لوڈ کریں"
+                  : "Download delivery POD / invoice"}
+              </a>
+            )}
             {moving && (
               <div className="customer-track-eta">
                 <Truck size={17} />
@@ -343,6 +376,43 @@ export default function PublicTracking({ token }: { token: string }) {
                   urdu ? "رابطہ نمبر (اختیاری)" : "Phone or email (optional)"
                 }
               />
+              <label className="customer-proof-upload">
+                <Upload size={15} />
+                <span>
+                  {urdu
+                    ? "ثبوت کی تصاویر شامل کریں (زیادہ سے زیادہ 3)"
+                    : "Attach proof photos (up to 3)"}
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={async event => {
+                    const files = Array.from(event.target.files ?? []).slice(
+                      0,
+                      3
+                    );
+                    try {
+                      const photos = await Promise.all(
+                        files.map(compressCustomerPhoto)
+                      );
+                      setProofPhotos(photos);
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : "Could not attach photo"
+                      );
+                    }
+                  }}
+                />
+                {proofPhotos.length > 0 && (
+                  <small>
+                    {proofPhotos.length} photo
+                    {proofPhotos.length === 1 ? "" : "s"} attached
+                  </small>
+                )}
+              </label>
               <button
                 className="button secondary"
                 onClick={() =>
@@ -351,6 +421,7 @@ export default function PublicTracking({ token }: { token: string }) {
                     issue: issue as any,
                     message: issueMessage,
                     contact,
+                    proofPhotos,
                   })
                 }
                 disabled={report.isPending || issueMessage.trim().length < 2}
@@ -388,31 +459,81 @@ export function CustomerTrackingLanding() {
     if (meta) meta.content = "noindex, nofollow, noarchive";
   }, []);
   return (
-    <main className={`customer-portal-page${urdu ? " rtl" : ""}`} dir={urdu ? "rtl" : "ltr"}>
+    <main
+      className={`customer-portal-page${urdu ? " rtl" : ""}`}
+      dir={urdu ? "rtl" : "ltr"}
+    >
       <header className="customer-track-header">
-        <a className="customer-track-brand" href="/customer-tracking" aria-label="NAZMI POD">
+        <a
+          className="customer-track-brand"
+          href="/customer-tracking"
+          aria-label="NAZMI POD"
+        >
           <span className="customer-track-mark">N</span>
-          <span><b>NAZMI POD</b><small>NAZMI PACKAGING</small></span>
+          <span>
+            <b>NAZMI POD</b>
+            <small>NAZMI PACKAGING</small>
+          </span>
         </a>
-        <button className="language-button" onClick={() => { const next = !urdu; setUrdu(next); localStorage.setItem("nazmi-lang", next ? "UR" : "EN"); }}>
+        <button
+          className="language-button"
+          onClick={() => {
+            const next = !urdu;
+            setUrdu(next);
+            localStorage.setItem("nazmi-lang", next ? "UR" : "EN");
+          }}
+        >
           {urdu ? "EN" : "اردو"}
         </button>
       </header>
       <section className="customer-portal-hero">
-        <span className="customer-track-eyebrow">{urdu ? "کسٹمر پورٹل" : "CUSTOMER PORTAL"}</span>
+        <span className="customer-track-eyebrow">
+          {urdu ? "کسٹمر پورٹل" : "CUSTOMER PORTAL"}
+        </span>
         <h1>{urdu ? "اپنی ڈیلیوری ٹریک کریں" : "Track your delivery"}</h1>
-        <p>{urdu ? "اپنے بھیجے گئے محفوظ ٹریکنگ لنک کو یہاں کھولیں۔ لاگ اِن کی ضرورت نہیں۔" : "Open the secure tracking link sent to you. No account or staff login is required."}</p>
+        <p>
+          {urdu
+            ? "اپنے بھیجے گئے محفوظ ٹریکنگ لنک کو یہاں کھولیں۔ لاگ اِن کی ضرورت نہیں۔"
+            : "Open the secure tracking link sent to you. No account or staff login is required."}
+        </p>
         <form onSubmit={openTracking} className="customer-portal-form">
-          <input value={link} onChange={e => setLink(e.target.value)} placeholder={urdu ? "ٹریکنگ لنک پیسٹ کریں" : "Paste your tracking link or token"} aria-label="Tracking link" />
-          <button className="button primary" type="submit"><PackageCheck size={16} />{urdu ? "ڈیلیوری دیکھیں" : "View delivery"}</button>
+          <input
+            value={link}
+            onChange={e => setLink(e.target.value)}
+            placeholder={
+              urdu
+                ? "ٹریکنگ لنک پیسٹ کریں"
+                : "Paste your tracking link or token"
+            }
+            aria-label="Tracking link"
+          />
+          <button className="button primary" type="submit">
+            <PackageCheck size={16} />
+            {urdu ? "ڈیلیوری دیکھیں" : "View delivery"}
+          </button>
         </form>
         <div className="customer-portal-promises">
-          <span><Truck size={16} /><b>{urdu ? "لائیو ETA" : "Live ETA"}</b><small>{urdu ? "روانگی کے بعد" : "When on route"}</small></span>
-          <span><MapPin size={16} /><b>{urdu ? "محفوظ مقام" : "Safe location"}</b><small>{urdu ? "صرف ٹریکنگ لنک سے" : "Link-only access"}</small></span>
-          <span><CheckCircle2 size={16} /><b>{urdu ? "آسان تصدیق" : "Easy confirmation"}</b><small>{urdu ? "رسید کی تصدیق" : "Receipt confirmation"}</small></span>
+          <span>
+            <Truck size={16} />
+            <b>{urdu ? "لائیو ETA" : "Live ETA"}</b>
+            <small>{urdu ? "روانگی کے بعد" : "When on route"}</small>
+          </span>
+          <span>
+            <MapPin size={16} />
+            <b>{urdu ? "محفوظ مقام" : "Safe location"}</b>
+            <small>{urdu ? "صرف ٹریکنگ لنک سے" : "Link-only access"}</small>
+          </span>
+          <span>
+            <CheckCircle2 size={16} />
+            <b>{urdu ? "آسان تصدیق" : "Easy confirmation"}</b>
+            <small>{urdu ? "رسید کی تصدیق" : "Receipt confirmation"}</small>
+          </span>
         </div>
       </section>
-      <footer className="customer-track-footer">NAZMI PACKAGING · {urdu ? "محفوظ ڈیلیوری ٹریکنگ" : "Secure delivery tracking"}</footer>
+      <footer className="customer-track-footer">
+        NAZMI PACKAGING ·{" "}
+        {urdu ? "محفوظ ڈیلیوری ٹریکنگ" : "Secure delivery tracking"}
+      </footer>
     </main>
   );
 }

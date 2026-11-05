@@ -2994,3 +2994,29 @@ a {
     flex-direction: column;
   }
 }
+.customer-pdf-button {
+  display: inline-flex;
+  margin-top: 12px;
+}
+.customer-proof-upload {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 13px;
+  border: 1px dashed #b9d9ca;
+  border-radius: 10px;
+  background: #f6fcf8;
+  color: #34765d;
+  font-size: 11px;
+  cursor: pointer;
+}
+.customer-proof-upload input[type="file"] {
+  display: none;
+}
+.customer-proof-upload small {
+  width: 100%;
+  margin-left: 23px;
+  color: #7b9388;
+  font-size: 10px;
+}
