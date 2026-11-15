@@ -1,6 +1,6 @@
 {
   "routes": [
-    { "path": "/", "title": "NAZMI POD dashboard" },
+    { "path": "/", "title": "CRAVORA dashboard" },
     { "path": "/deliveries", "title": "Deliveries" },
     { "path": "/staff", "title": "Staff and permissions" },
     { "path": "/pod", "title": "Proof of delivery" },

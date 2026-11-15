@@ -38,7 +38,7 @@ export default function PublicTracking({ token }: { token: string }) {
   );
   const [customerName, setCustomerName] = useState("");
   const [confirmNotes, setConfirmNotes] = useState("");
-  const [issue, setIssue] = useState("Missing cartons");
+  const [issue, setIssue] = useState("Missing frozen cases");
   const [issueMessage, setIssueMessage] = useState("");
   const [contact, setContact] = useState("");
   const [proofPhotos, setProofPhotos] = useState<string[]>([]);
@@ -66,7 +66,7 @@ export default function PublicTracking({ token }: { token: string }) {
   });
   const data = query.data;
   useEffect(() => {
-    document.title = "Delivery tracking | NAZMI POD";
+    document.title = "Delivery tracking | CRAVORA";
     let meta = document.querySelector<HTMLMetaElement>('meta[name="robots"]');
     if (!meta) {
       meta = document.createElement("meta");
@@ -75,7 +75,7 @@ export default function PublicTracking({ token }: { token: string }) {
     }
     meta.content = "noindex, nofollow, noarchive";
     return () => {
-      document.title = "NAZMI POD";
+      document.title = "CRAVORA";
       meta?.remove();
     };
   }, []);
@@ -110,11 +110,11 @@ export default function PublicTracking({ token }: { token: string }) {
       dir={urdu ? "rtl" : "ltr"}
     >
       <header className="customer-track-header">
-        <a className="customer-track-brand" href="/" aria-label="NAZMI POD">
+        <a className="customer-track-brand" href="/" aria-label="CRAVORA">
           <span className="customer-track-mark">N</span>
           <span>
-            <b>NAZMI POD</b>
-            <small>NAZMI PACKAGING</small>
+            <b>CRAVORA</b>
+            <small>CRAVORA FROZEN FOODS</small>
           </span>
         </a>
         <button
@@ -209,7 +209,7 @@ export default function PublicTracking({ token }: { token: string }) {
               <div>
                 <span>
                   <PackageCheck size={15} />
-                  {urdu ? "کارٹن" : "Cartons"}
+                  {urdu ? "کیسز" : "Cases"}
                 </span>
                 <b>
                   {data.deliveredCartons} / {data.cartons}
@@ -249,8 +249,8 @@ export default function PublicTracking({ token }: { token: string }) {
               >
                 <Download size={15} />
                 {urdu
-                  ? "POD / انوائس PDF ڈاؤن لوڈ کریں"
-                  : "Download delivery POD / invoice"}
+                  ? "Delivery proof / انوائس PDF ڈاؤن لوڈ کریں"
+                  : "Download delivery proof / invoice"}
               </a>
             )}
             {moving && (
@@ -356,7 +356,7 @@ export default function PublicTracking({ token }: { token: string }) {
                 {urdu ? "مسئلہ رپورٹ کریں" : "Report a delivery issue"}
               </h2>
               <select value={issue} onChange={e => setIssue(e.target.value)}>
-                <option>Missing cartons</option>
+                <option>Missing frozen cases</option>
                 <option>Damaged goods</option>
                 <option>Wrong delivery</option>
                 <option>Late delivery</option>
@@ -434,7 +434,7 @@ export default function PublicTracking({ token }: { token: string }) {
         )}
       </section>
       <footer className="customer-track-footer">
-        {data?.companyName || "NAZMI PACKAGING"} ·{" "}
+        {data?.companyName || "CRAVORA FROZEN FOODS"} ·{" "}
         {urdu ? "محفوظ ڈیلیوری ٹریکنگ" : "Secure delivery tracking"}
       </footer>
     </main>
@@ -454,7 +454,7 @@ export function CustomerTrackingLanding() {
     window.location.assign(`/track/${encodeURIComponent(token)}`);
   };
   useEffect(() => {
-    document.title = "Customer delivery tracking | NAZMI POD";
+    document.title = "Customer delivery tracking | CRAVORA";
     const meta = document.querySelector<HTMLMetaElement>('meta[name="robots"]');
     if (meta) meta.content = "noindex, nofollow, noarchive";
   }, []);
@@ -467,12 +467,12 @@ export function CustomerTrackingLanding() {
         <a
           className="customer-track-brand"
           href="/customer-tracking"
-          aria-label="NAZMI POD"
+          aria-label="CRAVORA"
         >
           <span className="customer-track-mark">N</span>
           <span>
-            <b>NAZMI POD</b>
-            <small>NAZMI PACKAGING</small>
+            <b>CRAVORA</b>
+            <small>CRAVORA FROZEN FOODS</small>
           </span>
         </a>
         <button
@@ -531,7 +531,7 @@ export function CustomerTrackingLanding() {
         </div>
       </section>
       <footer className="customer-track-footer">
-        NAZMI PACKAGING ·{" "}
+        CRAVORA FROZEN FOODS ·{" "}
         {urdu ? "محفوظ ڈیلیوری ٹریکنگ" : "Secure delivery tracking"}
       </footer>
     </main>

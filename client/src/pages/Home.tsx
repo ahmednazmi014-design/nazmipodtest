@@ -173,7 +173,7 @@ const ui = {
     cancel: "Cancel",
     loading: "Loading…",
     signIn: "Sign in",
-    signInTitle: "Sign in to NAZMI POD",
+    signInTitle: "Sign in to CRAVORA",
     identifier: "Username or email",
     password: "Password",
     continue: "Use your account username or email and password to continue.",
@@ -250,7 +250,7 @@ const ui = {
     cancel: "منسوخ",
     loading: "لوڈ ہو رہا ہے…",
     signIn: "سائن اِن",
-    signInTitle: "NAZMI POD میں سائن اِن کریں",
+    signInTitle: "CRAVORA میں سائن اِن کریں",
     identifier: "صارف نام یا ای میل",
     password: "پاس ورڈ",
     continue: "جاری رکھنے کے لیے اپنا صارف نام یا ای میل اور پاس ورڈ درج کریں۔",
@@ -373,7 +373,7 @@ function Brand() {
         N<span>✓</span>
       </span>
       <span>
-        <b>NAZMI POD</b>
+        <b>CRAVORA</b>
         <small>Delivery control</small>
       </span>
     </div>
@@ -479,7 +479,7 @@ function AuthScreen({
       <div className="auth-side">
         <Brand />
         <div className="auth-message">
-          <span className="eyebrow">NAZMI PACKAGING COMPANY</span>
+          <span className="eyebrow">CRAVORA FROZEN FOODS</span>
           <h1>{t.tagline}</h1>
           <p>{t.taglineDetail}</p>
           <div className="auth-points">
@@ -703,7 +703,7 @@ function Dashboard({
           Unassigned: "رائیڈر مقرر نہیں",
           "Failed delivery": "ناکام ڈیلیوری",
           "Partial delivery": "جزوی ڈیلیوری",
-          "POD review": "POD جائزہ",
+          "Proof review": "پروف جائزہ",
         }[reason] ?? reason)
       : reason;
   const completion = summary?.cartons
@@ -765,7 +765,7 @@ function Dashboard({
         delivery.proofStatus === "Ready" &&
         ["Delivered", "Partially Delivered"].includes(delivery.status)
       )
-        reasons.push("POD review");
+        reasons.push("Proof review");
       return { delivery, reasons };
     })
     .filter(item => item.reasons.length > 0)
@@ -880,7 +880,7 @@ function Dashboard({
           tone="amber"
         />
         <Metric
-          label="POD review queue"
+          label="Proof review queue"
           value={summary?.pendingVerification ?? 0}
           hint="Evidence awaiting verification"
           icon={<ClipboardCheck />}
@@ -914,7 +914,7 @@ function Dashboard({
             <small>failed or partial</small>
           </div>
           <div>
-            <span>POD review</span>
+            <span>Proof review</span>
             <b>{summary?.pendingVerification ?? 0}</b>
             <small>evidence waiting</small>
           </div>
@@ -955,7 +955,7 @@ function Dashboard({
           <div className="progress-card">
             <div className="progress-ring">
               <strong>{completion}%</strong>
-              <small>cartons delivered</small>
+              <small>cases delivered</small>
             </div>
             <div className="progress-list">
               <span>
@@ -1042,7 +1042,7 @@ function Dashboard({
                   key={delivery.id}
                   onClick={() =>
                     navigate(
-                      reasons.includes("POD review") ? "pod" : "deliveries"
+                      reasons.includes("Proof review") ? "pod" : "deliveries"
                     )
                   }
                 >
@@ -1227,7 +1227,7 @@ function DeliveryTable({
                 <b>
                   {delivery.deliveredCartons}/{delivery.cartons}
                 </b>
-                <small>cartons</small>
+                <small>cases</small>
               </td>
               <td>
                 <StatusPill status={delivery.status} />
@@ -2088,7 +2088,7 @@ function DeliveryDrawer({
                 <Button
                   variant="secondary"
                   onClick={() => {
-                    const message = `Hello ${delivery.customer}, your NAZMI POD delivery ${delivery.id} can be tracked here: ${trackingLink}`;
+                    const message = `Hello ${delivery.customer}, your CRAVORA delivery ${delivery.id} can be tracked here: ${trackingLink}`;
                     const phone = delivery.contact.replace(/[^\d+]/g, "");
                     const target = phone
                       ? `https://wa.me/${phone.replace(/^\+/, "")}?text=${encodeURIComponent(message)}`
@@ -2432,7 +2432,7 @@ function PodView({
   lang: Lang;
 }) {
   const verify = trpc.deliveries.verifyProof.useMutation({
-    onSuccess: () => toast.success("POD review saved"),
+    onSuccess: () => toast.success("Proof review saved"),
   });
   const utils = trpc.useUtils();
   useEffect(() => {
@@ -2446,15 +2446,15 @@ function PodView({
       <PageHeading
         eyebrow="Evidence / verification"
         title="Proof of delivery"
-        detail="Review carton handovers, confirm GPS evidence, and download a branded PDF record."
+        detail="Review frozen-food handovers, confirm GPS evidence, and download a branded proof record."
       />
       <div className="callout">
         <FileText size={18} />
         <span>
           <b>Customer signature is not required.</b>
           <small>
-            Carton quantities, optional photos, remarks, timestamp, rider and
-            GPS form the handover evidence.
+            Frozen case quantities, optional photos, remarks, timestamp, rider
+            and GPS form the handover evidence.
           </small>
         </span>
       </div>
@@ -2477,7 +2477,7 @@ function PodView({
                     {delivery.id} · {delivery.customer}
                   </b>
                   <small>
-                    {delivery.deliveredCartons}/{delivery.cartons} cartons ·{" "}
+                    {delivery.deliveredCartons}/{delivery.cartons} cases ·{" "}
                     {delivery.driver?.name ?? "Unassigned"} · submitted{" "}
                     {formatDate(delivery.completedAt)}
                   </small>
@@ -2536,7 +2536,7 @@ function PodView({
             ))}
           </div>
         ) : (
-          <EmptyState text="No POD evidence is waiting for review." />
+          <EmptyState text="No delivery proof is waiting for review." />
         )}
       </section>
     </>
@@ -2972,7 +2972,7 @@ function DriverView({
       toast.success(
         lang === "UR"
           ? "کارٹن اسکین محفوظ ہو گیا"
-          : `Carton scan ${result.scannedCount} saved`
+          : `Case scan ${result.scannedCount} saved`
       );
       void utils.deliveries.list.invalidate();
     },
@@ -3042,7 +3042,7 @@ function DriverView({
               setQueueMessage(
                 code === "CONFLICT"
                   ? `POD needs review: ${message}. It remains safely queued.`
-                  : `${message}. The POD remains queued and will not be discarded.`
+                  : `${message}. The Delivery proof remains queued and will not be discarded.`
               );
             break;
           }
@@ -3273,7 +3273,9 @@ function DriverView({
           ].includes(code ?? "")
         ) {
           toast.error(
-            error instanceof Error ? error.message : "POD could not be saved."
+            error instanceof Error
+              ? error.message
+              : "Delivery proof could not be saved."
           );
           return;
         }
@@ -3290,16 +3292,16 @@ function DriverView({
       setPendingCount(queued.length);
       setQueueMessage(
         navigator.onLine
-          ? "Network did not confirm the save. POD is queued safely; tap Sync pending when ready."
-          : "Offline. POD is queued on this device and will sync after reconnecting."
+          ? "Network did not confirm the save. Delivery proof is queued safely; tap Sync pending when ready."
+          : "Offline. Delivery proof is queued on this device and will sync after reconnecting."
       );
-      toast.info("POD safely queued on this device.");
+      toast.info("Delivery proof safely queued on this device.");
       if (navigator.onLine) syncQueueRef.current();
     } catch (error) {
       toast.error(
         error instanceof Error
           ? error.message
-          : "Could not store POD offline. Keep this screen open and retry."
+          : "Could not store delivery proof offline. Keep this screen open and retry."
       );
     }
   };
@@ -3466,7 +3468,9 @@ function DriverView({
           <div className="driver-grid">
             <section className="panel proof-form">
               <PanelTitle
-                eyebrow={lang === "UR" ? "کارٹن ہینڈ اوور" : "CARTON HANDOVER"}
+                eyebrow={
+                  lang === "UR" ? "کارٹن ہینڈ اوور" : "FROZEN DELIVERY HANDOVER"
+                }
                 title={
                   lang === "UR" ? "کیا ڈیلیور ہوا؟" : "What was delivered?"
                 }
@@ -3500,12 +3504,12 @@ function DriverView({
                   <b>
                     {lang === "UR"
                       ? "چالان / کارٹن بارکوڈ"
-                      : "Challan / carton barcode"}
+                      : "Shipment / case barcode"}
                   </b>
                   <small>
                     {lang === "UR"
                       ? "منفرد اسکین شدہ کارٹن"
-                      : `Unique carton scans · ${active.scannedBarcodes?.length ?? 0} / ${active.cartons}`}
+                      : `Unique case scans · ${active.scannedBarcodes?.length ?? 0} / ${active.cartons}`}
                   </small>
                 </div>
                 <div className="barcode-scan-controls">
@@ -3560,7 +3564,7 @@ function DriverView({
                   placeholder={
                     lang === "UR"
                       ? "مثلاً 2 کارٹن واپس"
-                      : "e.g. 2 cartons returned"
+                      : "e.g. 2 cases returned"
                   }
                 />
               </Field>
@@ -3696,8 +3700,8 @@ function DriverView({
                     ? "محفوظ ہو رہا ہے…"
                     : "Saving…"
                   : lang === "UR"
-                    ? "ڈیلیوری ختم کریں اور POD جمع کریں"
-                    : "End delivery & submit POD"}
+                    ? "ڈیلیوری ختم کریں اور ڈیلیوری ثبوت جمع کریں"
+                    : "End delivery & submit delivery proof"}
               </Button>
               <p className="signature-note">
                 {lang === "UR"
@@ -3942,7 +3946,7 @@ function Modal({
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <div>
-            <span className="eyebrow">NAZMI POD</span>
+            <span className="eyebrow">CRAVORA</span>
             <h2>{title}</h2>
           </div>
           <button className="icon-button" onClick={onClose}>
@@ -4022,7 +4026,7 @@ export default function Home() {
         <div className="workspace-chip">
           <span className="live-dot" />
           <span>
-            <b>Nazmi Packaging</b>
+            <b>CRAVORA Frozen Foods</b>
             <small>Primary workspace</small>
           </span>
         </div>
@@ -4143,7 +4147,7 @@ export default function Home() {
                 navigate(user.role === "Driver" ? "driver" : "overview")
               }
             >
-              <Zap size={15} /> NAZMI POD <span>/</span>{" "}
+              <Zap size={15} /> CRAVORA <span>/</span>{" "}
               <b>
                 {user.role === "Driver"
                   ? t.driver
@@ -4413,7 +4417,7 @@ function DriverPreviewView({
           <h2>What a rider sees on the road</h2>
           <p>
             Use this view to train staff and check the handover flow. GPS,
-            scans, photos, and POD actions remain disabled here.
+            scans, photos, and delivery proof actions remain disabled here.
           </p>
         </div>
         <Truck size={38} />
@@ -4421,7 +4425,7 @@ function DriverPreviewView({
       <div className="driver-preview-grid">
         <section className="panel preview-phone">
           <div className="preview-phone-top">
-            <span>NAZMI POD</span>
+            <span>CRAVORA</span>
             <b>Rider route</b>
           </div>
           <div className="preview-status">
@@ -4454,7 +4458,7 @@ function DriverPreviewView({
           />
           <div className="checklist">
             <span>
-              <Check size={15} /> Confirm challan and cartons
+              <Check size={15} /> Confirm shipment and case count
             </span>
             <span>
               <MapPin size={15} /> Share live GPS while driving
@@ -4529,7 +4533,7 @@ function ReportsView({
       <PageHeading
         eyebrow="Owner reporting / exports"
         title={lang === "UR" ? "رپورٹس اور ایکسپورٹس" : "Reports & Exports"}
-        detail="Track delivery outcomes, carton movement, POD completion, and download a clean operational report."
+        detail="Track delivery outcomes, case movement, delivery proof completion, and download a clean operational report."
         action={
           <Button onClick={exportReport}>
             <Download size={15} /> Export CSV
@@ -4540,7 +4544,7 @@ function ReportsView({
         <Metric
           label="Completion rate"
           value={cartons ? Math.round((deliveredCartons / cartons) * 100) : 0}
-          hint="percent of cartons delivered"
+          hint="percent of cases delivered"
           icon={<BarChart3 />}
           tone="blue"
         />
@@ -4609,7 +4613,7 @@ function ReportsView({
         </div>
         <div className="report-actions">
           <Button variant="secondary" onClick={() => navigate("pod")}>
-            <FileCheck2 size={15} /> Review POD queue
+            <FileCheck2 size={15} /> Review delivery proof queue
           </Button>
           <Button variant="ghost" onClick={() => navigate("audit")}>
             <ShieldCheck size={15} /> Open audit log

@@ -1,4 +1,4 @@
-# NAZMI POD — Outcome Checklist
+# CRAVORA — Outcome Checklist
 
 ## Core delivery operations
 
@@ -11,7 +11,7 @@
 ## Proof of delivery
 
 - [x] Driver workflow stays simple: open the assigned delivery, see customer/address/challan/cartons, enter delivered cartons, optionally enter rejected/damaged cartons and a short note, optionally select proof photos, request GPS, and tap End delivery & submit POD. No customer signature is required.
-- [x] Successful and partial submissions store carton handover evidence and enter POD review; authorized supervisors can verify or flag correction, with an audit record.
+- [x] Successful and partial submissions store frozen-food handover evidence and enter POD review; authorized supervisors can verify or flag correction, with an audit record.
 - [x] Authenticated POD PDFs contain delivery details, quantities, timestamps, driver context, GPS when available, remarks, and up to three uploaded JPEG photos with capture-time/GPS/note captions.
 - [x] Redesigned the invoice/POD PDF with clear hierarchy, customer and delivery summary cards, a carton/rate/amount table, timestamped milestones and durations, proof/GPS notes, photo captions, page numbers, and optional pricing/tax totals only when entered. Customer signature remains optional/not required.
 

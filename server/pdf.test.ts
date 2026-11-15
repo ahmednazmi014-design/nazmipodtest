@@ -60,7 +60,7 @@ describe("createPodPdf photos", () => {
     expect(text).toContain("%%EOF");
     expect(text).toContain("/Subtype /Image");
     expect(text).toContain("/Filter /DCTDecode");
-    expect(text).toContain("PROOF OF DELIVERY / CARTON HANDOVER");
+    expect(text).toContain("INVOICE / DELIVERY PROOF / COLD-CHAIN HANDOVER");
     expect(text).toContain("Example Customer");
     expect(text).toContain("Received by customer");
     expect(pdf.indexOf(JPEG)).toBeGreaterThan(-1);
@@ -172,8 +172,8 @@ describe("invoice and photo metadata", () => {
       ],
     };
     const text = createPodPdf(proof, undefined, store).toString("latin1");
-    expect(text).toContain("POD note continues on the following page.");
-    expect(text).toContain("POD NOTE CONTINUATION");
+    expect(text).toContain("Delivery proof note continues on the following page.");
+    expect(text).toContain("DELIVERY PROOF NOTE CONTINUATION");
     expect(text).toContain("ENDNOTE");
     expect((text.match(/\/Type \/Page\b/g) ?? []).length).toBe(3);
   });

@@ -197,7 +197,7 @@ const blankStore = (): Store => ({
   customerConfirmations: [],
   customerIssues: [],
   settings: {
-    companyName: "Nazmi Packaging Company (Pvt.) Ltd.",
+    companyName: "CRAVORA Frozen Foods",
     address: "",
     phone: "",
     email: "",
@@ -212,9 +212,18 @@ function ensureParent() {
 }
 
 function normalizeStore(parsed: Store): Store {
+  const parsedCompanyName = parsed.settings?.companyName?.trim() ?? "";
+  const companyName = /nazmi\s+packaging/i.test(parsedCompanyName)
+    ? "CRAVORA Frozen Foods"
+    : parsedCompanyName || "CRAVORA Frozen Foods";
   return {
     ...blankStore(),
     ...parsed,
+    settings: {
+      ...blankStore().settings,
+      ...parsed.settings,
+      companyName,
+    },
     notifications: parsed.notifications ?? [],
     trackingTokens: parsed.trackingTokens ?? [],
     customerConfirmations: parsed.customerConfirmations ?? [],

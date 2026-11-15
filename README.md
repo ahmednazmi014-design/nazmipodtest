@@ -1,6 +1,6 @@
-# NAZMI POD
+# CRAVORA
 
-NAZMI POD is a password-protected delivery operations workspace for Nazmi Packaging Company (Pvt.) Ltd. It supports dispatch staff, riders, supervisors, accounts, and customer-facing delivery tracking. The application starts without seeded operational records; the Owner account is provisioned server-side through bootstrap environment variables.
+CRAVORA is a password-protected delivery operations workspace for CRAVORA Frozen Foods Company (Pvt.) Ltd. It supports dispatch staff, riders, supervisors, accounts, and customer-facing delivery tracking. The application starts without seeded operational records; the Owner account is provisioned server-side through bootstrap environment variables.
 
 ## Delivered operations
 

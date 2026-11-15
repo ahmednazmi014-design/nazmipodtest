@@ -232,7 +232,7 @@ export function createPodPdf(
       y = PAGE_HEIGHT - MARGIN;
       rect(0, PAGE_HEIGHT, PAGE_WIDTH, 42, C.navy);
       txt(
-        store.settings.companyName || "Nazmi Packaging Company (Pvt.) Ltd.",
+        store.settings.companyName || "CRAVORA Frozen Foods",
         MARGIN,
         PAGE_HEIGHT - 14,
         9,
@@ -250,14 +250,13 @@ export function createPodPdf(
       y = PAGE_HEIGHT - 58;
     }
   };
-  const company =
-    store.settings.companyName || "Nazmi Packaging Company (Pvt.) Ltd.";
+  const company = store.settings.companyName || "CRAVORA Frozen Foods";
   // Masthead and document identity.
   rect(0, PAGE_HEIGHT, PAGE_WIDTH, 118, C.navy);
   rect(MARGIN, PAGE_HEIGHT - 31, 4, 38, C.gold);
   txt(company, MARGIN + 14, PAGE_HEIGHT - 34, 19, true, C.white);
   txt(
-    "INVOICE / PROOF OF DELIVERY / CARTON HANDOVER",
+    "INVOICE / DELIVERY PROOF / COLD-CHAIN HANDOVER",
     MARGIN + 14,
     PAGE_HEIGHT - 59,
     9,
@@ -265,7 +264,7 @@ export function createPodPdf(
     "0.78 0.88 0.84"
   );
   txt(
-    "CARTON HANDOVER RECORD",
+    "FROZEN DELIVERY HANDOVER RECORD",
     MARGIN + 14,
     PAGE_HEIGHT - 75,
     8,
@@ -294,7 +293,7 @@ export function createPodPdf(
     C.white
   );
   txt(
-    `CHALLAN  ${delivery.challan || "Not provided"}`,
+    `SHIPMENT REF  ${delivery.challan || "Not provided"}`,
     PAGE_WIDTH - 210,
     PAGE_HEIGHT - 78,
     8,
@@ -360,18 +359,18 @@ export function createPodPdf(
     y -= 17;
   }
   ensure(140);
-  y = section("Carton & rate summary", y);
+  y = section("Frozen product & rate summary", y);
   const cols = [MARGIN, MARGIN + 246, MARGIN + 320, MARGIN + 420];
   rect(MARGIN, y, PAGE_WIDTH - 2 * MARGIN, 22, C.navy);
   [
-    ["ITEM / DESCRIPTION", cols[0] + 9],
+    ["FROZEN PRODUCT / DESCRIPTION", cols[0] + 9],
     ["QTY", cols[1] + 8],
     ["RATE", cols[2] + 8],
     ["AMOUNT", cols[3] + 8],
   ].forEach(([s, x]) => txt(String(s), Number(x), y - 7, 7, true, C.white));
   const rowY = y - 22;
   const productLines = wrapToWidth(
-    delivery.product || "Cartons",
+    delivery.product || "Frozen cases",
     cols[1] - (cols[0] + 9) - 6,
     9
   );
@@ -406,7 +405,7 @@ export function createPodPdf(
   }
   y = rowY - rowHeight - 12;
   txt(
-    `Delivered: ${formatNumber(delivery.deliveredCartons)} cartons`,
+    `Delivered: ${formatNumber(delivery.deliveredCartons)} cases`,
     MARGIN,
     y,
     8,
@@ -414,7 +413,7 @@ export function createPodPdf(
     C.green
   );
   txt(
-    `Rejected / damaged: ${formatNumber(delivery.rejectedCartons)} cartons`,
+    `Rejected / damaged: ${formatNumber(delivery.rejectedCartons)} cases`,
     MARGIN + 180,
     y,
     8,
@@ -467,7 +466,7 @@ export function createPodPdf(
   }
   y -= 22;
   ensure(85);
-  y = section("Proof of delivery", y);
+  y = section("Delivery proof", y);
   const notes = delivery.proofNotes || delivery.notes || "No remarks recorded.";
   const gps = delivery.gps
     ? `${delivery.gps.lat.toFixed(6)}, ${delivery.gps.lng.toFixed(6)}${delivery.gps.accuracy != null ? `  (accuracy ${delivery.gps.accuracy}m)` : ""}`
@@ -475,7 +474,7 @@ export function createPodPdf(
   const evidence = [
     `Proof status: ${delivery.proofStatus}`,
     `GPS: ${gps}`,
-    `POD note: ${notes}`,
+    `Delivery proof note: ${notes}`,
   ];
   for (const line of evidence.flatMap(v => wrap(v, 92))) {
     ensure(14);
@@ -541,7 +540,9 @@ export function createPodPdf(
     rect(0, PAGE_HEIGHT, PAGE_WIDTH, 78, C.navy);
     txt(company, MARGIN, PAGE_HEIGHT - 24, 12, true, C.white);
     txt(
-      image.source === "customer" ? "CUSTOMER ISSUE PROOF" : "POD PHOTO EVIDENCE",
+      image.source === "customer"
+        ? "CUSTOMER ISSUE PROOF"
+        : "DELIVERY PROOF PHOTO EVIDENCE",
       MARGIN,
       PAGE_HEIGHT - 47,
       10,
@@ -587,7 +588,7 @@ export function createPodPdf(
     });
     if (continuedNote.length) {
       txt(
-        "POD note continues on the following page.",
+        "Delivery proof note continues on the following page.",
         MARGIN,
         my,
         8.5,
@@ -613,7 +614,7 @@ export function createPodPdf(
       rect(0, PAGE_HEIGHT, PAGE_WIDTH, 78, C.navy);
       txt(company, MARGIN, PAGE_HEIGHT - 24, 12, true, C.white);
       txt(
-        "POD NOTE CONTINUATION",
+        "DELIVERY PROOF NOTE CONTINUATION",
         MARGIN,
         PAGE_HEIGHT - 47,
         10,
@@ -640,7 +641,7 @@ export function createPodPdf(
     page.commands.push(
       `q ${C.line} RG 0.6 w ${MARGIN} 31 m ${PAGE_WIDTH - MARGIN} 31 l S Q`
     );
-    txt(`NAZMI  |  DELIVERY ${delivery.id}`, MARGIN, 23, 7, false, C.muted);
+    txt(`CRAVORA  |  DELIVERY ${delivery.id}`, MARGIN, 23, 7, false, C.muted);
     txt(
       `PAGE ${index + 1} OF ${pages.length}`,
       PAGE_WIDTH - MARGIN - 76,

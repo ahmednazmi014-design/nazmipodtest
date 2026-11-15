@@ -1,8 +1,8 @@
-# NAZMI POD — Implementation & Design Plan
+# CRAVORA — Implementation & Design Plan
 
 ## Product intent
 
-NAZMI POD is a secure, full-stack delivery operations system for Nazmi Packaging Company (Pvt.) Ltd. It gives dispatch a clear operational cockpit, gives riders a simple bilingual mobile workflow, and creates accountable proof of carton handover with timestamps, photos, GPS, audit history, and downloadable invoice/POD PDFs. Customer signature is not required.
+CRAVORA is a secure, full-stack delivery operations system for CRAVORA Frozen Foods Company (Pvt.) Ltd. It gives dispatch a clear operational cockpit, gives riders a simple bilingual mobile workflow, and creates accountable proof of frozen-food handover with timestamps, photos, GPS, audit history, and downloadable invoice/POD PDFs. Customer signature is not required.
 
 ## Current implementation and constraints
 
